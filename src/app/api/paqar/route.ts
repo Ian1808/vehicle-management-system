@@ -4,13 +4,19 @@ export async function GET(request: Request) {
     try {
         const url = new URL(request.url)
         const plate = url.searchParams.get('plate')
+        const nvic = url.searchParams.get('nvic')
+        const make = url.searchParams.get('make')
+        const year = url.searchParams.get('year')
+        const model = url.searchParams.get('model')
 
-        if (!plate) {
-            return NextResponse.json({ error: 'Plate number is required' }, { status: 400 })
+        let paqarUrl = 'https://paqar.my/api/v1/valuation?'
+        if (plate) {
+            paqarUrl += `plate=${encodeURIComponent(plate.toUpperCase().trim())}`
+        } else if (nvic && make && year && model) {
+            paqarUrl += `nvic=${encodeURIComponent(nvic)}&make=${encodeURIComponent(make)}&year=${year}&model=${encodeURIComponent(model)}`
+        } else {
+            return NextResponse.json({ error: 'Missing required parameters (plate or nvic+make+year+model)' }, { status: 400 })
         }
-
-        const cleanedPlate = plate.toUpperCase().trim().replace(/[^A-Z0-9]/g, '')
-        const paqarUrl = `https://paqar.my/api/v1/valuation?plate=${encodeURIComponent(cleanedPlate)}`
 
         const paqarRes = await fetch(paqarUrl, {
             method: 'GET',
@@ -19,6 +25,8 @@ export async function GET(request: Request) {
                 'User-Agent': 'VehicleManagementSystem/1.0',
             },
         })
+
+        const citationHeader = paqarRes.headers.get('X-Citation') || 'Paqar.my'
 
         if (!paqarRes.ok) {
             const errorText = await paqarRes.text()
@@ -29,7 +37,10 @@ export async function GET(request: Request) {
         }
 
         const data = await paqarRes.json()
-        return NextResponse.json(data)
+
+        const response = NextResponse.json(data)
+        response.headers.set('X-Citation', citationHeader)
+        return response
     } catch (error: any) {
         return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 })
     }
