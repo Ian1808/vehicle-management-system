@@ -77,13 +77,23 @@ export default function AdminDashboard() {
     const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null)
     const [previewMedia, setPreviewMedia] = useState<PreviewMedia | null>(null)
 
+    // Theme State ('dark' | 'light')
+    const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+
     // Settings Modal State
     const [showSettingsModal, setShowSettingsModal] = useState(false)
     const [currentUserId, setCurrentUserId] = useState<string | null>(null)
     const [currentUserEmail, setCurrentUserEmail] = useState<string>('')
     const [settingsFullName, setSettingsFullName] = useState('')
     const [settingsUsername, setSettingsUsername] = useState('')
-    const [settingsNewPassword, setSettingsNewPassword] = useState('')
+
+    // Secure Password Change State
+    const [oldPassword, setOldPassword] = useState('')
+    const [newPassword, setNewPassword] = useState('')
+    const [confirmNewPassword, setConfirmNewPassword] = useState('')
+    const [showOldPassword, setShowOldPassword] = useState(false)
+    const [showNewPassword, setShowNewPassword] = useState(false)
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
     const supabase = createClient()
 
@@ -180,20 +190,42 @@ export default function AdminDashboard() {
         try {
             const { error: profileError } = await supabase
                 .from('users')
-                .update({ full_name: settingsFullName, username: settingsUsername })
+                .update({ full_name: settingsFullName })
                 .eq('id', currentUserId)
 
             if (profileError) throw profileError
 
-            if (settingsNewPassword.trim()) {
+            if (newPassword.trim()) {
+                if (!oldPassword.trim()) {
+                    showToast('Please enter your current (old) password to change passwords.', 'error')
+                    return
+                }
+                if (newPassword !== confirmNewPassword) {
+                    showToast('New passwords do not match.', 'error')
+                    return
+                }
+
+                const { error: signInError } = await supabase.auth.signInWithPassword({
+                    email: currentUserEmail,
+                    password: oldPassword.trim(),
+                })
+
+                if (signInError) {
+                    showToast('Incorrect old password provided.', 'error')
+                    return
+                }
+
                 const { error: passwordError } = await supabase.auth.updateUser({
-                    password: settingsNewPassword.trim(),
+                    password: newPassword.trim(),
                 })
                 if (passwordError) throw passwordError
-                setSettingsNewPassword('')
+
+                setOldPassword('')
+                setNewPassword('')
+                setConfirmNewPassword('')
             }
 
-            showToast('Account settings updated successfully!', 'success')
+            showToast('Settings & security updated successfully!', 'success')
             setShowSettingsModal(false)
         } catch (err: any) {
             showToast(err.message || 'Failed to update settings.', 'error')
@@ -336,14 +368,15 @@ export default function AdminDashboard() {
     }
 
     const additionalPhotos = mediaItems.filter(m => m.media_type === 'photo_additional')
+    const isDark = theme === 'dark'
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 relative">
+        <div className={`min-h-screen relative selection:bg-purple-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
             {toast && (
                 <div className="fixed top-6 right-6 z-50 animate-bounce">
-                    <div className={`px-5 py-3 rounded-xl shadow-2xl text-sm font-semibold flex items-center gap-3 border ${toast.type === 'success'
-                            ? 'bg-emerald-900 text-emerald-100 border-emerald-700'
-                            : 'bg-rose-900 text-rose-100 border-rose-700'
+                    <div className={`px-5 py-3 rounded-2xl shadow-2xl text-xs font-bold flex items-center gap-3 border ${toast.type === 'success'
+                            ? 'bg-emerald-950 text-emerald-200 border-emerald-700/80 shadow-emerald-950/50'
+                            : 'bg-rose-950 text-rose-200 border-rose-700/80 shadow-rose-950/50'
                         }`}>
                         <span>{toast.type === 'success' ? '✨' : '⚠️'}</span>
                         <span>{toast.message}</span>
@@ -353,18 +386,18 @@ export default function AdminDashboard() {
 
             {confirmModal && (
                 <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                    <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl max-w-sm w-full p-6 text-slate-100 text-center">
-                        <div className="w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center text-xl font-bold bg-slate-800">
+                    <div className={`border rounded-3xl shadow-2xl max-w-sm w-full p-6 text-center ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
+                        <div className={`w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center text-xl font-bold border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>
                             {confirmModal.confirmVariant === 'danger' ? '⚠️' : confirmModal.confirmVariant === 'success' ? '✅' : '⚙️'}
                         </div>
-                        <h3 className="text-lg font-extrabold text-white">{confirmModal.title}</h3>
-                        <p className="text-xs text-slate-400 mt-2 font-medium leading-relaxed">{confirmModal.message}</p>
+                        <h3 className={`text-lg font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>{confirmModal.title}</h3>
+                        <p className={`text-xs mt-2 font-medium leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{confirmModal.message}</p>
 
                         <div className="flex gap-3 mt-6">
                             <button
                                 type="button"
                                 onClick={() => setConfirmModal(null)}
-                                className="w-1/2 py-2.5 rounded-xl text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer border border-slate-700"
+                                className={`w-1/2 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${isDark ? 'text-slate-300 bg-slate-800 hover:bg-slate-700 border-slate-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200'}`}
                             >
                                 Cancel
                             </button>
@@ -387,35 +420,110 @@ export default function AdminDashboard() {
 
             {/* Settings Modal */}
             {showSettingsModal && (
-                <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                    <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl max-w-md w-full p-8 text-slate-100">
+                <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto py-10">
+                    <div className={`border rounded-3xl shadow-2xl max-w-md w-full p-8 max-h-[90vh] overflow-y-auto ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
                         <div className="flex justify-between items-center mb-6">
                             <div>
-                                <h3 className="text-xl font-extrabold text-white">Admin Account Settings</h3>
-                                <p className="text-xs text-slate-400 mt-0.5 font-medium">Manage your personal profile and credentials.</p>
+                                <h3 className={`text-xl font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>Admin Account Settings</h3>
+                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Manage appearance, profile, and credentials.</p>
                             </div>
-                            <button onClick={() => setShowSettingsModal(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer">&times;</button>
+                            <button onClick={() => setShowSettingsModal(false)} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}>&times;</button>
                         </div>
 
                         <form onSubmit={handleUpdateSettings} className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold uppercase text-slate-400 tracking-wider mb-1.5">Email (Read-only)</label>
-                                <input type="text" disabled value={currentUserEmail} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-medium text-slate-500 cursor-not-allowed" />
+                            {/* Theme Preference */}
+                            <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                <label className={`block text-[11px] font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Interface Theme Mode</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setTheme('light')}
+                                        className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${theme === 'light' ? 'bg-purple-600 text-white border-purple-500 shadow-md' : isDark ? 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+                                    >
+                                        ☀️ Day Mode
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setTheme('dark')}
+                                        className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${theme === 'dark' ? 'bg-purple-600 text-white border-purple-500 shadow-md' : isDark ? 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+                                    >
+                                        🌙 Night Mode
+                                    </button>
+                                </div>
                             </div>
-                            <div>
-                                <label className="block text-xs font-bold uppercase text-slate-400 tracking-wider mb-1.5">Full Name *</label>
-                                <input type="text" required value={settingsFullName} onChange={(e) => setSettingsFullName(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none text-white" />
+
+                            {/* Read-Only Credentials */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Email (Locked)</label>
+                                    <input type="text" disabled value={currentUserEmail} className={`w-full border rounded-xl p-3 text-xs font-medium cursor-not-allowed ${isDark ? 'bg-slate-950 border-slate-800 text-slate-500' : 'bg-slate-100 border-slate-200 text-slate-500'}`} />
+                                </div>
+                                <div>
+                                    <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Username (Locked)</label>
+                                    <input type="text" disabled value={settingsUsername} className={`w-full border rounded-xl p-3 text-xs font-medium cursor-not-allowed ${isDark ? 'bg-slate-950 border-slate-800 text-slate-500' : 'bg-slate-100 border-slate-200 text-slate-500'}`} />
+                                </div>
                             </div>
+
                             <div>
-                                <label className="block text-xs font-bold uppercase text-slate-400 tracking-wider mb-1.5">Username *</label>
-                                <input type="text" required value={settingsUsername} onChange={(e) => setSettingsUsername(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none text-white" />
+                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Full Name *</label>
+                                <input type="text" required value={settingsFullName} onChange={(e) => setSettingsFullName(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`} />
                             </div>
-                            <div>
-                                <label className="block text-xs font-bold uppercase text-slate-400 tracking-wider mb-1.5">New Password (leave blank to keep current)</label>
-                                <input type="password" placeholder="••••••••" value={settingsNewPassword} onChange={(e) => setSettingsNewPassword(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none text-white" />
+
+                            {/* Password Change Section */}
+                            <div className={`pt-4 border-t space-y-3 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                                <h4 className={`text-xs font-black uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Change Password (Optional)</h4>
+
+                                <div>
+                                    <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Current Password</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showOldPassword ? 'text' : 'password'}
+                                            placeholder="••••••••"
+                                            value={oldPassword}
+                                            onChange={(e) => setOldPassword(e.target.value)}
+                                            className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                        />
+                                        <button type="button" onClick={() => setShowOldPassword(!showOldPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-purple-500 cursor-pointer">
+                                            {showOldPassword ? '🙈 Hide' : '👁️ View'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>New Password</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showNewPassword ? 'text' : 'password'}
+                                            placeholder="••••••••"
+                                            value={newPassword}
+                                            onChange={(e) => setNewPassword(e.target.value)}
+                                            className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                        />
+                                        <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-purple-500 cursor-pointer">
+                                            {showNewPassword ? '🙈 Hide' : '👁️ View'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Confirm New Password</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showConfirmPassword ? 'text' : 'password'}
+                                            placeholder="••••••••"
+                                            value={confirmNewPassword}
+                                            onChange={(e) => setConfirmNewPassword(e.target.value)}
+                                            className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                        />
+                                        <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-purple-500 cursor-pointer">
+                                            {showConfirmPassword ? '🙈 Hide' : '👁️ View'}
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
-                            <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
-                                <button type="button" onClick={() => setShowSettingsModal(false)} className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer border border-slate-700">Cancel</button>
+
+                            <div className={`flex justify-end gap-3 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                                <button type="button" onClick={() => setShowSettingsModal(false)} className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${isDark ? 'text-slate-300 bg-slate-800 hover:bg-slate-700 border-slate-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200'}`}>Cancel</button>
                                 <button type="submit" className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer">Save Changes</button>
                             </div>
                         </form>
@@ -426,18 +534,18 @@ export default function AdminDashboard() {
             {/* Media Preview Modal */}
             {previewMedia && (
                 <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                    <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl max-w-3xl w-full p-6 text-slate-100 flex flex-col max-h-[90vh]">
-                        <div className="flex justify-between items-center pb-4 border-b border-slate-800">
-                            <h3 className="text-base font-extrabold text-white truncate">{previewMedia.title}</h3>
+                    <div className={`border rounded-3xl shadow-2xl max-w-3xl w-full p-6 flex flex-col max-h-[90vh] ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
+                        <div className={`flex justify-between items-center pb-4 border-b ${isDark ? 'border-slate-800 text-white' : 'border-slate-200 text-slate-900'}`}>
+                            <h3 className="text-base font-extrabold truncate">{previewMedia.title}</h3>
                             <button
                                 onClick={() => setPreviewMedia(null)}
-                                className="bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer"
+                                className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
                             >
                                 &times;
                             </button>
                         </div>
 
-                        <div className="py-4 flex-1 overflow-auto flex items-center justify-center bg-slate-950 rounded-2xl my-4 border border-slate-800/80 p-2">
+                        <div className={`py-4 flex-1 overflow-auto flex items-center justify-center rounded-2xl my-4 border p-2 ${isDark ? 'bg-slate-950 border-slate-800/80' : 'bg-slate-50 border-slate-200'}`}>
                             {previewMedia.url.includes('.pdf') ? (
                                 <iframe src={previewMedia.url} className="w-full h-[60vh] rounded-xl border-0" title={previewMedia.title} />
                             ) : (
@@ -449,7 +557,7 @@ export default function AdminDashboard() {
                             )}
                         </div>
 
-                        <div className="flex flex-wrap justify-end gap-3 pt-2 border-t border-slate-800/80">
+                        <div className={`flex flex-wrap justify-end gap-3 pt-2 border-t ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
                             <button
                                 onClick={() => handleDownload(previewMedia.url, previewMedia.title)}
                                 className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
@@ -466,7 +574,7 @@ export default function AdminDashboard() {
                             </a>
                             <button
                                 onClick={() => setPreviewMedia(null)}
-                                className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
                             >
                                 Close
                             </button>
@@ -475,10 +583,10 @@ export default function AdminDashboard() {
                 </div>
             )}
 
-            <header className="bg-slate-900 border-b border-slate-800 shadow-lg">
+            <header className={`border-b shadow-lg ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 text-slate-900'}`}>
                 <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
                     <div className="flex items-center gap-4">
-                        <h1 className="text-xl font-black tracking-tight text-white flex items-center gap-2">
+                        <h1 className={`text-xl font-black tracking-tight flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
                             🛡️ Workshop Admin Hub
                             <span className="text-xs bg-purple-950 text-purple-300 px-3 py-1 rounded-full border border-purple-800/60 font-bold uppercase tracking-wider">
                                 System Administrator
@@ -486,28 +594,35 @@ export default function AdminDashboard() {
                         </h1>
                     </div>
                     <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => setTheme(isDark ? 'light' : 'dark')}
+                            className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-amber-600 border-slate-200'}`}
+                            title="Toggle Theme"
+                        >
+                            {isDark ? '☀️ Light' : '🌙 Dark'}
+                        </button>
                         <Link
                             href="/"
-                            className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-3.5 py-2 rounded-xl text-xs border border-slate-700 transition-colors"
+                            className={`font-semibold px-3.5 py-2 rounded-xl text-xs border transition-colors ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}
                         >
                             Front Desk View &rarr;
                         </Link>
                         <button
                             onClick={() => setShowSettingsModal(true)}
-                            className="bg-slate-800 hover:bg-slate-700 text-purple-300 font-semibold px-3.5 py-2 rounded-xl text-xs border border-slate-700 transition-colors cursor-pointer"
+                            className={`font-semibold px-3.5 py-2 rounded-xl text-xs border transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
                         >
                             ⚙️ Settings
                         </button>
                         <button
                             onClick={requestLogout}
-                            className="bg-rose-600/90 hover:bg-rose-500 text-white font-semibold px-3.5 py-2 rounded-xl text-xs shadow transition-all cursor-pointer"
+                            className="bg-rose-600 hover:bg-rose-500 text-white font-semibold px-3.5 py-2 rounded-xl text-xs shadow transition-all cursor-pointer"
                         >
                             Sign Out
                         </button>
                     </div>
                 </div>
 
-                <div className="max-w-7xl mx-auto px-6 flex gap-6 border-t border-slate-800/80 pt-3">
+                <div className={`max-w-7xl mx-auto px-6 flex gap-6 border-t pt-3 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                     <button
                         onClick={() => { setActiveTab('vehicles'); setSelectedVehicle(null); }}
                         className={`pb-3 text-xs font-bold tracking-wider uppercase border-b-2 cursor-pointer transition-all ${activeTab === 'vehicles' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -543,11 +658,11 @@ export default function AdminDashboard() {
                                 &larr; Back to Admin Vehicle Directory
                             </button>
 
-                            <div className="bg-slate-900 rounded-3xl border border-slate-800 p-8 mb-8 shadow-xl">
-                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-6 border-b border-slate-800">
+                            <div className={`rounded-3xl border p-8 mb-8 shadow-xl ${isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                                <div className={`flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
                                     <div>
                                         <div className="flex items-center gap-3">
-                                            <h2 className="text-3xl font-black text-white">{selectedVehicle.plate_number}</h2>
+                                            <h2 className="text-3xl font-black">{selectedVehicle.plate_number}</h2>
                                             <span className="px-3.5 py-1 rounded-full text-xs font-bold uppercase bg-purple-950 text-purple-300 border border-purple-800/60">
                                                 {selectedVehicle.status.replace(/_/g, ' ')}
                                             </span>
@@ -555,12 +670,12 @@ export default function AdminDashboard() {
                                         <p className="text-slate-400 mt-1 font-medium text-sm">{selectedVehicle.make_model_year} • VIN: {selectedVehicle.chassis_number}</p>
                                     </div>
 
-                                    <div className="flex items-center gap-2 bg-slate-950 p-2.5 rounded-2xl border border-slate-800">
+                                    <div className={`flex items-center gap-2 p-2.5 rounded-2xl border ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                         <span className="text-xs font-bold text-slate-400 uppercase tracking-wider pl-2">Override Status:</span>
                                         <select
                                             value={selectedVehicle.status}
                                             onChange={(e) => requestStatusOverride(e.target.value)}
-                                            className="bg-slate-900 border border-slate-700 text-xs font-bold text-purple-300 rounded-xl px-3 py-1.5 focus:outline-none cursor-pointer"
+                                            className={`border text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none cursor-pointer ${isDark ? 'bg-slate-900 border-slate-700 text-purple-300' : 'bg-white border-slate-300 text-purple-700'}`}
                                         >
                                             <option value="intake">Intake</option>
                                             <option value="pending_before_photos">Pending Before Photos</option>
@@ -571,20 +686,20 @@ export default function AdminDashboard() {
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 py-6 border-b border-slate-800">
-                                    <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800">
+                                <div className={`grid grid-cols-1 md:grid-cols-4 gap-4 py-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
+                                    <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Intake Cost</p>
-                                        <p className="text-xl font-black text-white mt-1">RM {selectedVehicle.intake_cost?.toLocaleString()}</p>
+                                        <p className="text-xl font-black mt-1">RM {selectedVehicle.intake_cost?.toLocaleString()}</p>
                                     </div>
-                                    <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800">
+                                    <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Market Value</p>
-                                        <p className="text-xl font-black text-white mt-1">RM {selectedVehicle.market_value?.toLocaleString()}</p>
+                                        <p className="text-xl font-black mt-1">RM {selectedVehicle.market_value?.toLocaleString()}</p>
                                     </div>
-                                    <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800">
+                                    <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Repair Cost</p>
-                                        <p className="text-xl font-black text-white mt-1">RM {selectedVehicle.repair_cost?.toLocaleString()}</p>
+                                        <p className="text-xl font-black mt-1">RM {selectedVehicle.repair_cost?.toLocaleString()}</p>
                                     </div>
-                                    <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800">
+                                    <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Est. Margin / Net</p>
                                         <p className="text-xl font-black text-emerald-400 mt-1">
                                             RM {((selectedVehicle.market_value || 0) - (selectedVehicle.intake_cost || 0) - (selectedVehicle.repair_cost || 0)).toLocaleString()}
@@ -593,7 +708,7 @@ export default function AdminDashboard() {
                                 </div>
 
                                 <div className="pt-6">
-                                    <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider mb-4">1. Front Desk Verified Documents</h3>
+                                    <h3 className="text-sm font-bold uppercase tracking-wider mb-4">1. Front Desk Verified Documents</h3>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                                         {['grant', 'jpj', 'insurance', 'ber'].map((cat) => {
                                             const doc = mediaItems.find(m => m.media_type === 'document' && m.category === cat)
@@ -603,9 +718,9 @@ export default function AdminDashboard() {
                                                         cat === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
 
                                             return (
-                                                <div key={cat} className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
+                                                <div key={cat} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                                     <div>
-                                                        <p className="text-xs font-bold text-white uppercase tracking-wider mb-1">{docLabel}</p>
+                                                        <p className="text-xs font-bold uppercase tracking-wider mb-1">{docLabel}</p>
                                                         <p className={`text-[11px] font-semibold mb-4 ${doc ? 'text-emerald-400' : 'text-slate-500'}`}>
                                                             {doc ? '✓ Verified File Attached' : 'Not Uploaded'}
                                                         </p>
@@ -614,7 +729,7 @@ export default function AdminDashboard() {
                                                         <button
                                                             type="button"
                                                             onClick={() => setPreviewMedia({ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${docLabel}` })}
-                                                            className="w-full text-center bg-slate-800 hover:bg-slate-700 text-purple-300 py-2 rounded-xl text-xs font-bold transition-colors border border-slate-700 cursor-pointer"
+                                                            className={`w-full text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-700 border-slate-300'}`}
                                                         >
                                                             Inspect Document &rarr;
                                                         </button>
@@ -626,43 +741,43 @@ export default function AdminDashboard() {
                                 </div>
 
                                 <div className="pt-8">
-                                    <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider mb-4">2. Technician Evidence Audit (8 Angles)</h3>
+                                    <h3 className="text-sm font-bold uppercase tracking-wider mb-4">2. Technician Evidence Audit (8 Angles)</h3>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         {PHOTO_CATEGORIES.map((cat) => {
                                             const before = mediaItems.find(m => m.media_type === 'photo_before' && m.category === cat.key)
                                             const after = mediaItems.find(m => m.media_type === 'photo_after' && m.category === cat.key)
 
                                             return (
-                                                <div key={cat.key} className="bg-slate-950 border border-slate-800 rounded-2xl p-4">
-                                                    <p className="text-xs font-bold text-slate-200 uppercase tracking-wider mb-3">{cat.label}</p>
+                                                <div key={cat.key} className={`border rounded-2xl p-4 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                                    <p className="text-xs font-bold uppercase tracking-wider mb-3">{cat.label}</p>
                                                     <div className="grid grid-cols-2 gap-3 text-center">
-                                                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
+                                                        <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                                                             <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider mb-2">Before Repair</p>
                                                             {before ? (
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => setPreviewMedia({ url: before.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })}
-                                                                    className="w-full bg-slate-800 hover:bg-slate-700 text-emerald-400 py-1.5 rounded-lg text-xs font-bold border border-slate-700 transition-colors cursor-pointer"
+                                                                    className={`w-full py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}
                                                                 >
                                                                     Inspect Photo
                                                                 </button>
                                                             ) : (
-                                                                <span className="text-[11px] text-slate-600 italic">Missing</span>
+                                                                <span className="text-[11px] text-slate-500 italic">Missing</span>
                                                             )}
                                                         </div>
 
-                                                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
+                                                        <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                                                             <p className="text-[10px] font-bold text-blue-400 uppercase tracking-wider mb-2">After Repair</p>
                                                             {after ? (
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => setPreviewMedia({ url: after.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })}
-                                                                    className="w-full bg-slate-800 hover:bg-slate-700 text-blue-400 py-1.5 rounded-lg text-xs font-bold border border-slate-700 transition-colors cursor-pointer"
+                                                                    className={`w-full py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-blue-400 border-slate-700' : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'}`}
                                                                 >
                                                                     Inspect Photo
                                                                 </button>
                                                             ) : (
-                                                                <span className="text-[11px] text-slate-600 italic">Missing</span>
+                                                                <span className="text-[11px] text-slate-500 italic">Missing</span>
                                                             )}
                                                         </div>
                                                     </div>
@@ -679,7 +794,7 @@ export default function AdminDashboard() {
                                             {additionalPhotos.map((item) => {
                                                 const displayTitle = item.category.replace(/^extra_/, '').replace(/_[0-9]+$/, '').replace(/_/g, ' ')
                                                 return (
-                                                    <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
+                                                    <div key={item.id} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                                         <div>
                                                             <p className="text-xs font-bold text-purple-300 uppercase tracking-wider mb-1 capitalize">{displayTitle}</p>
                                                             <p className="text-[11px] font-semibold text-emerald-400 mb-4">✓ Extra Evidence Photo</p>
@@ -687,7 +802,7 @@ export default function AdminDashboard() {
                                                         <button
                                                             type="button"
                                                             onClick={() => setPreviewMedia({ url: item.file_url, title: `${selectedVehicle.plate_number} - ${displayTitle}` })}
-                                                            className="w-full text-center bg-slate-800 hover:bg-slate-700 text-purple-300 py-2 rounded-xl text-xs font-bold transition-colors border border-slate-700 cursor-pointer"
+                                                            className={`w-full text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-700 border-slate-300'}`}
                                                         >
                                                             Inspect Photo &rarr;
                                                         </button>
@@ -703,12 +818,12 @@ export default function AdminDashboard() {
                         <div>
                             <div className="flex justify-between items-center mb-6">
                                 <div>
-                                    <h2 className="text-2xl font-black text-white">Active Vehicle Registry</h2>
+                                    <h2 className="text-2xl font-black">Active Vehicle Registry</h2>
                                     <p className="text-xs text-slate-400 font-medium mt-0.5">Supervise all active cases, inspect documentation, and perform status overrides.</p>
                                 </div>
                             </div>
 
-                            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                            <div className={`border rounded-2xl overflow-hidden shadow-xl ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                                 {loading ? (
                                     <div className="p-16 text-center text-slate-500 font-medium">Loading vehicle inventory...</div>
                                 ) : vehicles.length === 0 ? (
@@ -717,7 +832,7 @@ export default function AdminDashboard() {
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-left border-collapse">
                                             <thead>
-                                                <tr className="bg-slate-950/80 text-slate-400 text-[11px] uppercase font-bold tracking-wider border-b border-slate-800">
+                                                <tr className={`text-[11px] uppercase font-bold tracking-wider border-b ${isDark ? 'bg-slate-950/80 text-slate-400 border-slate-800' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
                                                     <th className="p-4">Plate Number</th>
                                                     <th className="p-4">Make / Model / Year</th>
                                                     <th className="p-4">Status</th>
@@ -726,18 +841,18 @@ export default function AdminDashboard() {
                                                     <th className="p-4 text-right">Admin Actions</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-slate-800 text-xs font-medium">
+                                            <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-100 text-slate-700'}`}>
                                                 {vehicles.map((v) => (
-                                                    <tr key={v.id} className="hover:bg-slate-800/40 transition-colors">
-                                                        <td className="p-4 font-bold text-purple-300">{v.plate_number}</td>
-                                                        <td className="p-4 text-slate-300">{v.make_model_year}</td>
+                                                    <tr key={v.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}`}>
+                                                        <td className="p-4 font-bold text-purple-400">{v.plate_number}</td>
+                                                        <td className="p-4">{v.make_model_year}</td>
                                                         <td className="p-4">
                                                             <span className="px-3 py-1 rounded-full text-[11px] font-bold uppercase bg-purple-950 text-purple-300 border border-purple-800/60">
                                                                 {v.status.replace(/_/g, ' ')}
                                                             </span>
                                                         </td>
-                                                        <td className="p-4 font-bold text-slate-200">RM {v.intake_cost?.toLocaleString()}</td>
-                                                        <td className="p-4 font-bold text-slate-200">RM {v.market_value?.toLocaleString()}</td>
+                                                        <td className="p-4 font-bold">RM {v.intake_cost?.toLocaleString()}</td>
+                                                        <td className="p-4 font-bold">RM {v.market_value?.toLocaleString()}</td>
                                                         <td className="p-4 text-right">
                                                             <div className="flex justify-end gap-2">
                                                                 <button
@@ -769,16 +884,16 @@ export default function AdminDashboard() {
                     <div>
                         <div className="flex justify-between items-center mb-6">
                             <div>
-                                <h2 className="text-2xl font-black text-white">Staff Account Governance</h2>
+                                <h2 className="text-2xl font-black">Staff Account Governance</h2>
                                 <p className="text-xs text-slate-400 font-medium mt-0.5">Manage staff authority roles (`admin`, `front_desk`, `technician`, `bidder`).</p>
                             </div>
                         </div>
 
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                        <div className={`border rounded-2xl overflow-hidden shadow-xl ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                             <div className="overflow-x-auto">
                                 <table className="w-full text-left border-collapse">
                                     <thead>
-                                        <tr className="bg-slate-950/80 text-slate-400 text-[11px] uppercase font-bold tracking-wider border-b border-slate-800">
+                                        <tr className={`text-[11px] uppercase font-bold tracking-wider border-b ${isDark ? 'bg-slate-950/80 text-slate-400 border-slate-800' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
                                             <th className="p-4">Staff Member</th>
                                             <th className="p-4">Username</th>
                                             <th className="p-4">Email</th>
@@ -786,12 +901,12 @@ export default function AdminDashboard() {
                                             <th className="p-4">Change Role Authority</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-slate-800 text-xs font-medium">
+                                    <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-100 text-slate-700'}`}>
                                         {staffUsers.map((u) => (
-                                            <tr key={u.id} className="hover:bg-slate-800/40 transition-colors">
-                                                <td className="p-4 font-bold text-white">{u.full_name || 'Staff Member'}</td>
-                                                <td className="p-4 text-purple-300 font-mono">{u.username}</td>
-                                                <td className="p-4 text-slate-300">{u.email || 'N/A'}</td>
+                                            <tr key={u.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}`}>
+                                                <td className="p-4 font-bold">{u.full_name || 'Staff Member'}</td>
+                                                <td className="p-4 text-purple-400 font-mono">{u.username}</td>
+                                                <td className="p-4">{u.email || 'N/A'}</td>
                                                 <td className="p-4">
                                                     <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${u.role === 'admin'
                                                             ? 'bg-purple-950 text-purple-300 border-purple-800'
@@ -806,7 +921,7 @@ export default function AdminDashboard() {
                                                     <select
                                                         value={u.role}
                                                         onChange={(e) => requestRoleChange(u.id, e.target.value, u.username)}
-                                                        className="bg-slate-950 border border-slate-700 text-xs font-bold text-slate-200 rounded-xl px-3 py-1.5 focus:outline-none cursor-pointer"
+                                                        className={`border text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none cursor-pointer ${isDark ? 'bg-slate-950 border-slate-700 text-slate-200' : 'bg-white border-slate-300 text-slate-800'}`}
                                                     >
                                                         <option value="admin">Admin</option>
                                                         <option value="front_desk">Front Desk</option>
@@ -827,31 +942,31 @@ export default function AdminDashboard() {
                     <div>
                         <div className="flex justify-between items-center mb-6">
                             <div>
-                                <h2 className="text-2xl font-black text-white">Archived Vehicles Trash Bin</h2>
+                                <h2 className="text-2xl font-black">Archived Vehicles Trash Bin</h2>
                                 <p className="text-xs text-slate-400 font-medium mt-0.5">Soft-deleted vehicles are stored here and can be restored anytime.</p>
                             </div>
                         </div>
 
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                        <div className={`border rounded-2xl overflow-hidden shadow-xl ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                             {deletedVehicles.length === 0 ? (
                                 <div className="p-16 text-center text-slate-500 font-medium">Trash bin is clean. No archived vehicles.</div>
                             ) : (
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-left border-collapse">
                                         <thead>
-                                            <tr className="bg-slate-950/80 text-slate-400 text-[11px] uppercase font-bold tracking-wider border-b border-slate-800">
+                                            <tr className={`text-[11px] uppercase font-bold tracking-wider border-b ${isDark ? 'bg-slate-950/80 text-slate-400 border-slate-800' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
                                                 <th className="p-4">Plate Number</th>
                                                 <th className="p-4">Make / Model / Year</th>
                                                 <th className="p-4">Last Known Status</th>
                                                 <th className="p-4 text-right">Restore Action</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-slate-800 text-xs font-medium">
+                                        <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-100 text-slate-700'}`}>
                                             {deletedVehicles.map((v) => (
-                                                <tr key={v.id} className="hover:bg-slate-800/40 transition-colors">
-                                                    <td className="p-4 font-bold text-rose-300">{v.plate_number}</td>
-                                                    <td className="p-4 text-slate-300">{v.make_model_year}</td>
-                                                    <td className="p-4 text-slate-400 capitalize">{v.status.replace(/_/g, ' ')}</td>
+                                                <tr key={v.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}`}>
+                                                    <td className="p-4 font-bold text-rose-400">{v.plate_number}</td>
+                                                    <td className="p-4">{v.make_model_year}</td>
+                                                    <td className="p-4 capitalize text-slate-400">{v.status.replace(/_/g, ' ')}</td>
                                                     <td className="p-4 text-right">
                                                         <button
                                                             onClick={() => executeRestoreVehicle(v.id)}

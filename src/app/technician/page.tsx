@@ -58,6 +58,9 @@ export default function TechnicianPortal() {
     const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null)
     const [previewMedia, setPreviewMedia] = useState<PreviewMedia | null>(null)
 
+    // Theme State ('dark' | 'light')
+    const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+
     // Custom Label Dialog State for Additional Photos
     const [showLabelModal, setShowLabelModal] = useState(false)
     const [pendingAdditionalFile, setPendingAdditionalFile] = useState<File | null>(null)
@@ -69,7 +72,14 @@ export default function TechnicianPortal() {
     const [currentUserEmail, setCurrentUserEmail] = useState<string>('')
     const [settingsFullName, setSettingsFullName] = useState('')
     const [settingsUsername, setSettingsUsername] = useState('')
-    const [settingsNewPassword, setSettingsNewPassword] = useState('')
+
+    // Secure Password Change State
+    const [oldPassword, setOldPassword] = useState('')
+    const [newPassword, setNewPassword] = useState('')
+    const [confirmNewPassword, setConfirmNewPassword] = useState('')
+    const [showOldPassword, setShowOldPassword] = useState(false)
+    const [showNewPassword, setShowNewPassword] = useState(false)
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
     const supabase = createClient()
 
@@ -145,20 +155,42 @@ export default function TechnicianPortal() {
         try {
             const { error: profileError } = await supabase
                 .from('users')
-                .update({ full_name: settingsFullName, username: settingsUsername })
+                .update({ full_name: settingsFullName })
                 .eq('id', currentUserId)
 
             if (profileError) throw profileError
 
-            if (settingsNewPassword.trim()) {
+            if (newPassword.trim()) {
+                if (!oldPassword.trim()) {
+                    showToast('Please enter your current (old) password to change passwords.', 'error')
+                    return
+                }
+                if (newPassword !== confirmNewPassword) {
+                    showToast('New passwords do not match.', 'error')
+                    return
+                }
+
+                const { error: signInError } = await supabase.auth.signInWithPassword({
+                    email: currentUserEmail,
+                    password: oldPassword.trim(),
+                })
+
+                if (signInError) {
+                    showToast('Incorrect old password provided.', 'error')
+                    return
+                }
+
                 const { error: passwordError } = await supabase.auth.updateUser({
-                    password: settingsNewPassword.trim(),
+                    password: newPassword.trim(),
                 })
                 if (passwordError) throw passwordError
-                setSettingsNewPassword('')
+
+                setOldPassword('')
+                setNewPassword('')
+                setConfirmNewPassword('')
             }
 
-            showToast('Account settings updated successfully!', 'success')
+            showToast('Settings & security updated successfully!', 'success')
             setShowSettingsModal(false)
         } catch (err: any) {
             showToast(err.message || 'Failed to update settings.', 'error')
@@ -423,14 +455,15 @@ export default function TechnicianPortal() {
     }
 
     const additionalPhotos = mediaItems.filter(m => m.media_type === 'photo_additional')
+    const isDark = theme === 'dark'
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 pb-12 relative">
+        <div className={`min-h-screen pb-12 relative selection:bg-emerald-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
             {toast && (
                 <div className="fixed top-6 right-6 z-50 animate-bounce">
-                    <div className={`px-5 py-3 rounded-xl shadow-2xl text-sm font-semibold flex items-center gap-3 border ${toast.type === 'success'
-                            ? 'bg-emerald-900 text-emerald-100 border-emerald-700'
-                            : 'bg-rose-900 text-rose-100 border-rose-700'
+                    <div className={`px-5 py-3 rounded-2xl shadow-2xl text-xs font-bold flex items-center gap-3 border ${toast.type === 'success'
+                            ? 'bg-emerald-950 text-emerald-200 border-emerald-700/80 shadow-emerald-950/50'
+                            : 'bg-rose-950 text-rose-200 border-rose-700/80 shadow-rose-950/50'
                         }`}>
                         <span>{toast.type === 'success' ? '✨' : '⚠️'}</span>
                         <span>{toast.message}</span>
@@ -441,18 +474,18 @@ export default function TechnicianPortal() {
             {/* Confirmation Modal */}
             {confirmModal && (
                 <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                    <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl max-w-sm w-full p-6 text-slate-100 text-center">
-                        <div className="w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center text-xl font-bold bg-slate-800">
+                    <div className={`border rounded-3xl shadow-2xl max-w-sm w-full p-6 text-center ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
+                        <div className={`w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center text-xl font-bold border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>
                             {confirmModal.confirmVariant === 'danger' ? '⚠️' : confirmModal.confirmVariant === 'success' ? '✅' : '❓'}
                         </div>
-                        <h3 className="text-lg font-extrabold text-white">{confirmModal.title}</h3>
-                        <p className="text-xs text-slate-400 mt-2 font-medium leading-relaxed">{confirmModal.message}</p>
+                        <h3 className={`text-lg font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>{confirmModal.title}</h3>
+                        <p className={`text-xs mt-2 font-medium leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{confirmModal.message}</p>
 
                         <div className="flex gap-3 mt-6">
                             <button
                                 type="button"
                                 onClick={() => setConfirmModal(null)}
-                                className="w-1/2 py-2.5 rounded-xl text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer border border-slate-700"
+                                className={`w-1/2 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${isDark ? 'text-slate-300 bg-slate-800 hover:bg-slate-700 border-slate-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200'}`}
                             >
                                 Cancel
                             </button>
@@ -476,26 +509,26 @@ export default function TechnicianPortal() {
             {/* Custom Label Dialog Modal */}
             {showLabelModal && (
                 <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                    <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl max-w-sm w-full p-6 text-slate-100">
-                        <h3 className="text-base font-extrabold text-white mb-1">Label Additional Photo</h3>
-                        <p className="text-xs text-slate-400 mb-4">Enter a clear description for this extra evidence photo:</p>
+                    <div className={`border rounded-3xl shadow-2xl max-w-sm w-full p-6 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
+                        <h3 className={`text-base font-extrabold mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>Label Additional Photo</h3>
+                        <p className={`text-xs mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Enter a clear description for this extra evidence photo:</p>
                         <input
                             type="text"
                             value={customPhotoLabel}
                             onChange={(e) => setCustomPhotoLabel(e.target.value)}
                             placeholder="e.g. Scratched Bumper Detail"
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white mb-6 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            className={`w-full border rounded-xl p-3 text-xs mb-6 focus:outline-none focus:ring-2 focus:ring-emerald-500 ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
                         />
                         <div className="flex gap-3">
                             <button
                                 onClick={() => setShowLabelModal(false)}
-                                className="w-1/2 py-2.5 rounded-xl text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 cursor-pointer"
+                                className={`w-1/2 py-2.5 rounded-xl text-xs font-bold border cursor-pointer ${isDark ? 'text-slate-300 bg-slate-800 hover:bg-slate-700 border-slate-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200'}`}
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={confirmAdditionalPhotoUpload}
-                                className="w-1/2 py-2.5 rounded-xl text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 shadow-md cursor-pointer"
+                                className="w-1/2 py-2.5 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 shadow-md cursor-pointer"
                             >
                                 Continue
                             </button>
@@ -506,35 +539,110 @@ export default function TechnicianPortal() {
 
             {/* Settings Modal */}
             {showSettingsModal && (
-                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                    <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl max-w-md w-full p-8 text-slate-100">
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto py-10">
+                    <div className={`border rounded-3xl shadow-2xl max-w-md w-full p-8 max-h-[90vh] overflow-y-auto ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
                         <div className="flex justify-between items-center mb-6">
                             <div>
-                                <h3 className="text-xl font-extrabold text-white">Technician Account Settings</h3>
-                                <p className="text-xs text-slate-400 mt-0.5 font-medium">Manage your personal profile and credentials.</p>
+                                <h3 className={`text-xl font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>Technician Account Settings</h3>
+                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Manage appearance, profile, and credentials.</p>
                             </div>
-                            <button onClick={() => setShowSettingsModal(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer">&times;</button>
+                            <button onClick={() => setShowSettingsModal(false)} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}>&times;</button>
                         </div>
 
                         <form onSubmit={handleUpdateSettings} className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold uppercase text-slate-400 tracking-wider mb-1.5">Email (Read-only)</label>
-                                <input type="text" disabled value={currentUserEmail} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-medium text-slate-500 cursor-not-allowed" />
+                            {/* Theme Preference */}
+                            <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                <label className={`block text-[11px] font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Interface Theme Mode</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setTheme('light')}
+                                        className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${theme === 'light' ? 'bg-emerald-600 text-white border-emerald-500 shadow-md' : isDark ? 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+                                    >
+                                        ☀️ Day Mode
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setTheme('dark')}
+                                        className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${theme === 'dark' ? 'bg-emerald-600 text-white border-emerald-500 shadow-md' : isDark ? 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+                                    >
+                                        🌙 Night Mode
+                                    </button>
+                                </div>
                             </div>
-                            <div>
-                                <label className="block text-xs font-bold uppercase text-slate-400 tracking-wider mb-1.5">Full Name *</label>
-                                <input type="text" required value={settingsFullName} onChange={(e) => setSettingsFullName(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
+
+                            {/* Read-Only Credentials */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Email (Locked)</label>
+                                    <input type="text" disabled value={currentUserEmail} className={`w-full border rounded-xl p-3 text-xs font-medium cursor-not-allowed ${isDark ? 'bg-slate-950 border-slate-800 text-slate-500' : 'bg-slate-100 border-slate-200 text-slate-500'}`} />
+                                </div>
+                                <div>
+                                    <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Username (Locked)</label>
+                                    <input type="text" disabled value={settingsUsername} className={`w-full border rounded-xl p-3 text-xs font-medium cursor-not-allowed ${isDark ? 'bg-slate-950 border-slate-800 text-slate-500' : 'bg-slate-100 border-slate-200 text-slate-500'}`} />
+                                </div>
                             </div>
+
                             <div>
-                                <label className="block text-xs font-bold uppercase text-slate-400 tracking-wider mb-1.5">Username *</label>
-                                <input type="text" required value={settingsUsername} onChange={(e) => setSettingsUsername(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
+                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Full Name *</label>
+                                <input type="text" required value={settingsFullName} onChange={(e) => setSettingsFullName(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`} />
                             </div>
-                            <div>
-                                <label className="block text-xs font-bold uppercase text-slate-400 tracking-wider mb-1.5">New Password (leave blank to keep current)</label>
-                                <input type="password" placeholder="••••••••" value={settingsNewPassword} onChange={(e) => setSettingsNewPassword(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
+
+                            {/* Password Change Section */}
+                            <div className={`pt-4 border-t space-y-3 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                                <h4 className={`text-xs font-black uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Change Password (Optional)</h4>
+
+                                <div>
+                                    <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Current Password</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showOldPassword ? 'text' : 'password'}
+                                            placeholder="••••••••"
+                                            value={oldPassword}
+                                            onChange={(e) => setOldPassword(e.target.value)}
+                                            className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                        />
+                                        <button type="button" onClick={() => setShowOldPassword(!showOldPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-emerald-500 cursor-pointer">
+                                            {showOldPassword ? '🙈 Hide' : '👁️ View'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>New Password</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showNewPassword ? 'text' : 'password'}
+                                            placeholder="••••••••"
+                                            value={newPassword}
+                                            onChange={(e) => setNewPassword(e.target.value)}
+                                            className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                        />
+                                        <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-emerald-500 cursor-pointer">
+                                            {showNewPassword ? '🙈 Hide' : '👁️ View'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Confirm New Password</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showConfirmPassword ? 'text' : 'password'}
+                                            placeholder="••••••••"
+                                            value={confirmNewPassword}
+                                            onChange={(e) => setConfirmNewPassword(e.target.value)}
+                                            className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                        />
+                                        <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-emerald-500 cursor-pointer">
+                                            {showConfirmPassword ? '🙈 Hide' : '👁️ View'}
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
-                            <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
-                                <button type="button" onClick={() => setShowSettingsModal(false)} className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer border border-slate-700">Cancel</button>
+
+                            <div className={`flex justify-end gap-3 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                                <button type="button" onClick={() => setShowSettingsModal(false)} className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${isDark ? 'text-slate-300 bg-slate-800 hover:bg-slate-700 border-slate-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200'}`}>Cancel</button>
                                 <button type="submit" className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer">Save Changes</button>
                             </div>
                         </form>
@@ -545,18 +653,18 @@ export default function TechnicianPortal() {
             {/* Media Preview Modal */}
             {previewMedia && (
                 <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                    <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl max-w-3xl w-full p-6 text-slate-100 flex flex-col max-h-[90vh]">
-                        <div className="flex justify-between items-center pb-4 border-b border-slate-800">
-                            <h3 className="text-base font-extrabold text-white truncate">{previewMedia.title}</h3>
+                    <div className={`border rounded-3xl shadow-2xl max-w-3xl w-full p-6 flex flex-col max-h-[90vh] ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
+                        <div className={`flex justify-between items-center pb-4 border-b ${isDark ? 'border-slate-800 text-white' : 'border-slate-200 text-slate-900'}`}>
+                            <h3 className="text-base font-extrabold truncate">{previewMedia.title}</h3>
                             <button
                                 onClick={() => setPreviewMedia(null)}
-                                className="bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer"
+                                className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
                             >
                                 &times;
                             </button>
                         </div>
 
-                        <div className="py-4 flex-1 overflow-auto flex items-center justify-center bg-slate-950 rounded-2xl my-4 border border-slate-800/80 p-2">
+                        <div className={`py-4 flex-1 overflow-auto flex items-center justify-center rounded-2xl my-4 border p-2 ${isDark ? 'bg-slate-950 border-slate-800/80' : 'bg-slate-50 border-slate-200'}`}>
                             <img
                                 src={previewMedia.url}
                                 alt={previewMedia.title}
@@ -564,7 +672,7 @@ export default function TechnicianPortal() {
                             />
                         </div>
 
-                        <div className="flex flex-wrap justify-end gap-3 pt-2 border-t border-slate-800/80">
+                        <div className={`flex flex-wrap justify-end gap-3 pt-2 border-t ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
                             <button
                                 onClick={() => handleDownload(previewMedia.url, previewMedia.title)}
                                 className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
@@ -581,7 +689,7 @@ export default function TechnicianPortal() {
                             </a>
                             <button
                                 onClick={() => setPreviewMedia(null)}
-                                className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
                             >
                                 Close
                             </button>
@@ -591,29 +699,36 @@ export default function TechnicianPortal() {
             )}
 
             {/* Header */}
-            <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-20 shadow-md">
+            <header className={`border-b sticky top-0 z-20 shadow-md ${isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
                 <div className="max-w-3xl mx-auto px-4 py-4 flex justify-between items-center">
                     <h1 className="text-base font-bold tracking-wide text-emerald-400 flex items-center gap-2">
-                        🛠️ Technician Portal <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-md border border-slate-700">Mobile View</span>
+                        🛠️ Technician Portal <span className={`text-[10px] px-2 py-0.5 rounded-md border ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>Mobile View</span>
                     </h1>
                     <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setTheme(isDark ? 'light' : 'dark')}
+                            className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-amber-600 border-slate-200'}`}
+                            title="Toggle Theme"
+                        >
+                            {isDark ? '☀️' : '🌙'}
+                        </button>
                         {selectedVehicle && (
                             <button
                                 onClick={() => setSelectedVehicle(null)}
-                                className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-xl font-semibold transition-colors border border-slate-700 cursor-pointer"
+                                className={`text-xs px-3 py-1.5 rounded-xl font-semibold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}
                             >
                                 &larr; Switch
                             </button>
                         )}
                         <button
                             onClick={() => setShowSettingsModal(true)}
-                            className="text-xs bg-slate-800 hover:bg-slate-700 text-emerald-300 px-3 py-1.5 rounded-xl font-semibold transition-colors border border-slate-700 cursor-pointer"
+                            className={`text-xs px-3 py-1.5 rounded-xl font-semibold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-slate-700' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}
                         >
                             ⚙️ Settings
                         </button>
                         <button
                             onClick={requestLogout}
-                            className="text-xs bg-rose-600/90 hover:bg-rose-500 text-white px-3 py-1.5 rounded-xl font-semibold transition-colors shadow cursor-pointer"
+                            className="text-xs bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 rounded-xl font-semibold transition-colors shadow cursor-pointer"
                         >
                             Sign Out
                         </button>
@@ -624,13 +739,13 @@ export default function TechnicianPortal() {
             <main className="max-w-3xl mx-auto px-4 pt-6">
                 {!selectedVehicle ? (
                     <div>
-                        <h2 className="text-xl font-bold mb-1 text-white">Assigned Vehicles</h2>
+                        <h2 className={`text-xl font-bold mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>Assigned Vehicles</h2>
                         <p className="text-xs text-slate-400 mb-6 font-medium">Select a vehicle to inspect and capture mandatory photo evidence.</p>
 
                         {loading ? (
                             <div className="text-center py-16 text-slate-500 font-medium">Loading assigned vehicles...</div>
                         ) : vehicles.length === 0 ? (
-                            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-8 text-center text-slate-400">
+                            <div className={`border rounded-2xl p-8 text-center ${isDark ? 'bg-slate-900/80 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-600'}`}>
                                 No vehicles currently awaiting photo inspection.
                             </div>
                         ) : (
@@ -639,10 +754,10 @@ export default function TechnicianPortal() {
                                     <div
                                         key={v.id}
                                         onClick={() => selectVehicle(v)}
-                                        className="bg-slate-900 border border-slate-800 hover:border-emerald-500/80 p-4.5 rounded-2xl cursor-pointer transition-all flex justify-between items-center shadow-xs"
+                                        className={`border hover:border-emerald-500/80 p-4.5 rounded-2xl cursor-pointer transition-all flex justify-between items-center shadow-xs ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}
                                     >
                                         <div>
-                                            <h3 className="text-base font-bold text-white tracking-wide">{v.plate_number}</h3>
+                                            <h3 className={`text-base font-bold tracking-wide ${isDark ? 'text-white' : 'text-slate-900'}`}>{v.plate_number}</h3>
                                             <p className="text-xs text-slate-400 mt-0.5">{v.make_model_year}</p>
                                         </div>
                                         <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 capitalize">
@@ -655,16 +770,16 @@ export default function TechnicianPortal() {
                     </div>
                 ) : (
                     <div>
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6 shadow-sm">
+                        <div className={`border rounded-2xl p-6 mb-6 shadow-sm ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                             <div className="flex justify-between items-start mb-2">
-                                <h2 className="text-2xl font-black text-white">{selectedVehicle.plate_number}</h2>
+                                <h2 className={`text-2xl font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedVehicle.plate_number}</h2>
                                 <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 capitalize">
                                     {selectedVehicle.status.replace(/_/g, ' ')}
                                 </span>
                             </div>
                             <p className="text-xs text-slate-400 mb-5 font-medium">{selectedVehicle.make_model_year}</p>
 
-                            <div className="flex gap-2 pt-4 border-t border-slate-800">
+                            <div className={`flex gap-2 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
                                 {selectedVehicle.status === 'pending_before_photos' && (
                                     <button
                                         onClick={() => requestStatusTransition('in_repair')}
@@ -694,10 +809,10 @@ export default function TechnicianPortal() {
 
                         <div className="space-y-6">
                             {/* 1. MANDATORY BEFORE PHOTOS */}
-                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                            <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                                 <div className="flex justify-between items-center mb-4">
-                                    <h3 className="font-bold text-sm text-slate-200 uppercase tracking-wider">1. Mandatory "Before" Photos</h3>
-                                    <span className="text-xs bg-slate-800 px-3 py-1 rounded-full text-emerald-400 font-bold border border-slate-700">
+                                    <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>1. Mandatory "Before" Photos</h3>
+                                    <span className={`text-xs px-3 py-1 rounded-full font-bold border ${isDark ? 'bg-slate-800 text-emerald-400 border-slate-700' : 'bg-slate-100 text-emerald-600 border-slate-200'}`}>
                                         {mediaItems.filter(m => m.media_type === 'photo_before').length} / 8 Captured
                                     </span>
                                 </div>
@@ -708,9 +823,9 @@ export default function TechnicianPortal() {
                                         const inputId = `tech-input-before-${cat.key}`
 
                                         return (
-                                            <div key={cat.key} className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
+                                            <div key={cat.key} className={`border rounded-xl p-3.5 flex items-center justify-between ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                                 <div>
-                                                    <p className="text-xs font-bold text-slate-200">{cat.label}</p>
+                                                    <p className={`text-xs font-bold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{cat.label}</p>
                                                     <p className={`text-[10px] font-semibold mt-0.5 ${uploaded ? 'text-emerald-400' : 'text-slate-500'}`}>
                                                         {uploaded ? '✓ Captured' : 'Required'}
                                                     </p>
@@ -721,7 +836,7 @@ export default function TechnicianPortal() {
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setPreviewMedia({ url: uploaded.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })}
-                                                                className="text-[11px] bg-slate-800 text-emerald-400 px-2.5 py-1.5 rounded-lg font-bold border border-slate-700 hover:bg-slate-700 cursor-pointer"
+                                                                className={`text-[11px] px-2.5 py-1.5 rounded-lg font-bold border cursor-pointer ${isDark ? 'bg-slate-800 text-emerald-400 border-slate-700 hover:bg-slate-700' : 'bg-white text-emerald-600 border-slate-300 hover:bg-slate-100'}`}
                                                             >
                                                                 View
                                                             </button>
@@ -761,10 +876,10 @@ export default function TechnicianPortal() {
 
                             {/* 2. MANDATORY AFTER PHOTOS */}
                             {(selectedVehicle.status === 'in_repair' || selectedVehicle.status === 'pending_after_photos' || selectedVehicle.status === 'road_ready') && (
-                                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                                <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                                     <div className="flex justify-between items-center mb-4">
-                                        <h3 className="font-bold text-sm text-slate-200 uppercase tracking-wider">2. Mandatory "After" Photos</h3>
-                                        <span className="text-xs bg-slate-800 px-3 py-1 rounded-full text-blue-400 font-bold border border-slate-700">
+                                        <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>2. Mandatory "After" Photos</h3>
+                                        <span className={`text-xs px-3 py-1 rounded-full font-bold border ${isDark ? 'bg-slate-800 text-blue-400 border-slate-700' : 'bg-slate-100 text-blue-600 border-slate-200'}`}>
                                             {mediaItems.filter(m => m.media_type === 'photo_after').length} / 8 Captured
                                         </span>
                                     </div>
@@ -775,9 +890,9 @@ export default function TechnicianPortal() {
                                             const inputId = `tech-input-after-${cat.key}`
 
                                             return (
-                                                <div key={cat.key} className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
+                                                <div key={cat.key} className={`border rounded-xl p-3.5 flex items-center justify-between ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                                     <div>
-                                                        <p className="text-xs font-bold text-slate-200">{cat.label}</p>
+                                                        <p className={`text-xs font-bold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{cat.label}</p>
                                                         <p className={`text-[10px] font-semibold mt-0.5 ${uploaded ? 'text-blue-400' : 'text-slate-500'}`}>
                                                             {uploaded ? '✓ Captured' : 'Required'}
                                                         </p>
@@ -788,7 +903,7 @@ export default function TechnicianPortal() {
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => setPreviewMedia({ url: uploaded.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })}
-                                                                    className="text-[11px] bg-slate-800 text-blue-400 px-2.5 py-1.5 rounded-lg font-bold border border-slate-700 hover:bg-slate-700 cursor-pointer"
+                                                                    className={`text-[11px] px-2.5 py-1.5 rounded-lg font-bold border cursor-pointer ${isDark ? 'bg-slate-800 text-blue-400 border-slate-700 hover:bg-slate-700' : 'bg-white text-blue-600 border-slate-300 hover:bg-slate-100'}`}
                                                                 >
                                                                     View
                                                                 </button>
@@ -828,10 +943,10 @@ export default function TechnicianPortal() {
                             )}
 
                             {/* 3. ADDITIONAL PHOTOS & EVIDENCE */}
-                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                            <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                                 <div className="flex justify-between items-center mb-4">
                                     <div>
-                                        <h3 className="font-bold text-sm text-purple-300 uppercase tracking-wider">3. Additional Evidence Photos</h3>
+                                        <h3 className="font-bold text-sm text-purple-400 uppercase tracking-wider">3. Additional Evidence Photos</h3>
                                         <p className="text-[11px] text-slate-400">Upload close-up damage details, part codes, or extra inspection angles.</p>
                                     </div>
                                     <div>
@@ -853,7 +968,7 @@ export default function TechnicianPortal() {
                                 </div>
 
                                 {additionalPhotos.length === 0 ? (
-                                    <div className="bg-slate-950/50 border border-dashed border-slate-800 rounded-xl p-4 text-center text-xs text-slate-500 font-medium">
+                                    <div className={`border border-dashed rounded-xl p-4 text-center text-xs text-slate-500 font-medium ${isDark ? 'bg-slate-950/50 border-slate-800' : 'bg-slate-50 border-slate-300'}`}>
                                         No additional evidence photos uploaded yet. Tap "+ Add Photo" to snap optional extra angles.
                                     </div>
                                 ) : (
@@ -861,7 +976,7 @@ export default function TechnicianPortal() {
                                         {additionalPhotos.map((item) => {
                                             const displayTitle = item.category.replace(/^extra_/, '').replace(/_[0-9]+$/, '').replace(/_/g, ' ')
                                             return (
-                                                <div key={item.id} className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
+                                                <div key={item.id} className={`border rounded-xl p-3.5 flex items-center justify-between ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                                     <div>
                                                         <p className="text-xs font-bold text-purple-300 capitalize">{displayTitle}</p>
                                                         <p className="text-[10px] text-slate-400 font-semibold mt-0.5">✓ Extra Evidence</p>
@@ -870,7 +985,7 @@ export default function TechnicianPortal() {
                                                         <button
                                                             type="button"
                                                             onClick={() => setPreviewMedia({ url: item.file_url, title: `${selectedVehicle.plate_number} - ${displayTitle}` })}
-                                                            className="text-[11px] bg-slate-800 text-purple-300 px-2.5 py-1.5 rounded-lg font-bold border border-slate-700 hover:bg-slate-700 cursor-pointer"
+                                                            className={`text-[11px] px-2.5 py-1.5 rounded-lg font-bold border cursor-pointer ${isDark ? 'bg-slate-800 text-purple-300 border-slate-700 hover:bg-slate-700' : 'bg-white text-purple-700 border-slate-300 hover:bg-slate-100'}`}
                                                         >
                                                             View
                                                         </button>
