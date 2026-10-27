@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { useJPJPlate } from '@/hooks/useJPJPlate'
-import { fetchPaqarValuationByPlate } from '@/services/paqarService'
 import { getVehicleMakes, getModelsForMake, getYearsForVehicle, getVariantsForModel } from '@/services/vehicleDatabaseService'
 
 type Props = {
@@ -34,7 +33,6 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     const [marketVal, setMarketVal] = useState('')
     const [insurancePanel, setInsurancePanel] = useState('')
     const [intakeCost, setIntakeCost] = useState('')
-    const [isQueryingPaqar, setIsQueryingPaqar] = useState(false)
 
     if (!isOpen) return null
 
@@ -46,26 +44,6 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         setSelectedMake(make)
         setSelectedModel('')
         setSelectedVariant('')
-    }
-
-    // Optional: Query Paqar for valuation when plate is entered
-    async function handlePlateBlur() {
-        if (!plate || plateError) return
-
-        setIsQueryingPaqar(true)
-        showToast('Checking Paqar.my for live market valuation...', 'success')
-
-        try {
-            const data = await fetchPaqarValuationByPlate(plate)
-            if (data && !data.error && data.marketMedian) {
-                setMarketVal(String(data.marketMedian))
-                showToast(`Market valuation found: RM ${data.marketMedian.toLocaleString()}`, 'success')
-            }
-        } catch (err) {
-            // Fail silently if plate is not in Paqar database, since local database handles make/model/year
-        } finally {
-            setIsQueryingPaqar(false)
-        }
     }
 
     function handleSubmit(e: React.FormEvent) {
@@ -94,24 +72,20 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                 <div className="flex justify-between items-center mb-6">
                     <div>
                         <h3 className={`text-xl font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>New Vehicle Intake</h3>
-                        <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Local Vehicle DB (MeterApp inspired) + Paqar Valuation</p>
+                        <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Local Vehicle Database & Catalog</p>
                     </div>
                     <button onClick={onClose} className="rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg bg-slate-800 text-slate-400 hover:text-white cursor-pointer">&times;</button>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400 flex items-center justify-between">
-                            <span>Plate Number *</span>
-                            {isQueryingPaqar && <span className="text-[10px] text-blue-400 animate-pulse">Checking Paqar...</span>}
-                        </label>
+                        <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Plate Number *</label>
                         <input
                             type="text"
                             required
                             placeholder="e.g. WPH925 or VFE9578"
                             value={plate}
                             onChange={(e) => handlePlateChange(e.target.value)}
-                            onBlur={handlePlateBlur}
                             className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${plateError ? 'border-rose-500 bg-rose-950/25 text-rose-300' : 'border-slate-800 bg-slate-950 text-white'}`}
                         />
                         {plateError && <p className="text-[10px] font-bold text-rose-500 mt-1">⚠️ {plateError}</p>}
@@ -167,7 +141,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                             <input type="number" step="0.01" placeholder="0.00" value={intakeCost} onChange={(e) => setIntakeCost(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-medium bg-slate-950 text-white" />
                         </div>
                         <div>
-                            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Market Value (Paqar RM)</label>
+                            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Market Value (RM)</label>
                             <input type="number" step="0.01" placeholder="0.00" value={marketVal} onChange={(e) => setMarketVal(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-medium bg-slate-950 text-white" />
                         </div>
                     </div>
