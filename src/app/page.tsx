@@ -59,7 +59,7 @@ export default function MainDashboard() {
                 }
 
                 const params = new URLSearchParams(window.location.search)
-                const requested = params.get('tab') || ''
+                const requested = params.get('tab') || window.localStorage.getItem('vms-landing-module') || ''
                 const allowed = ALLOWED_TABS[userRole]
                 const initial = allowed.includes(requested) ? requested : ROLE_MODULES[userRole]
 

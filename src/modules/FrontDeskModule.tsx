@@ -168,9 +168,24 @@ export default function FrontDeskModule() {
     if (!currentUserId) return { ok: false, error: 'Not authenticated.' }
 
     try {
+      if (!payload.username.trim()) {
+        return { ok: false, error: 'Username cannot be empty.' }
+      }
+
+      const { data: existingUsername } = await supabase
+        .from('users')
+        .select('id')
+        .eq('username', payload.username)
+        .neq('id', currentUserId)
+        .maybeSingle()
+
+      if (existingUsername) {
+        return { ok: false, error: 'That username is already taken.' }
+      }
+
       const { error: profileError } = await supabase
         .from('users')
-        .update({ full_name: payload.fullName })
+        .update({ full_name: payload.fullName, username: payload.username })
         .eq('id', currentUserId)
 
       if (profileError) throw profileError
@@ -194,6 +209,7 @@ export default function FrontDeskModule() {
       }
 
       setSettingsFullName(payload.fullName)
+      setSettingsUsername(payload.username)
       showToast('Settings & security updated successfully!', 'success')
       return { ok: true }
     } catch (err: any) {
@@ -299,9 +315,10 @@ export default function FrontDeskModule() {
 
   async function handleSendToWorkshop() {
     if (!selectedVehicle) return
+    const docCount = mediaItems.filter(m => m.media_type === 'document').length
     setConfirmModal({
       title: 'Proceed to Workshop',
-      message: `Send vehicle ${selectedVehicle.plate_number} to the workshop for 'Before' photo capture?`,
+      message: `Send vehicle ${selectedVehicle.plate_number} to the workshop for 'Before' photo capture? Documents on file: ${docCount}/4.`,
       confirmText: 'Proceed',
       confirmVariant: 'success',
       onConfirm: async () => {

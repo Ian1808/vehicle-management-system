@@ -4,6 +4,7 @@ import { useState } from 'react'
 
 export type AccountSettingsPayload = {
     fullName: string
+    username: string
     oldPassword: string
     newPassword: string
     confirmPassword: string
@@ -19,6 +20,7 @@ type AccountSettingsModalProps = {
     username: string
     fullName: string
     accent?: 'blue' | 'purple'
+    showLandingModule?: boolean
     onClose: () => void
     onSave: (payload: AccountSettingsPayload) => Promise<{ ok: boolean; error?: string }>
 }
@@ -46,12 +48,15 @@ export default function AccountSettingsModal({
     username,
     fullName,
     accent = 'blue',
+    showLandingModule = false,
     onClose,
     onSave,
 }: AccountSettingsModalProps) {
     const accentStyles = ACCENT_STYLES[accent]
 
     const [fullNameInput, setFullNameInput] = useState(fullName)
+    const [usernameInput, setUsernameInput] = useState(username)
+    const [landingModule, setLandingModule] = useState(() => (typeof window !== 'undefined' ? window.localStorage.getItem('vms-landing-module') || '' : ''))
     const [oldPassword, setOldPassword] = useState('')
     const [newPassword, setNewPassword] = useState('')
     const [confirmNewPassword, setConfirmNewPassword] = useState('')
@@ -74,9 +79,20 @@ export default function AccountSettingsModal({
             return
         }
         setSaving(true)
-        const result = await onSave({ fullName: fullNameInput, oldPassword, newPassword, confirmPassword: confirmNewPassword })
+        const result = await onSave({
+            fullName: fullNameInput,
+            username: usernameInput.trim(),
+            oldPassword,
+            newPassword,
+            confirmPassword: confirmNewPassword,
+        })
         setSaving(false)
-        if (result.ok) onClose()
+        if (result.ok) {
+            if (showLandingModule) {
+                window.localStorage.setItem('vms-landing-module', landingModule)
+            }
+            onClose()
+        }
         else setError(result.error || 'Failed to update settings.')
     }
 
@@ -112,14 +128,26 @@ export default function AccountSettingsModal({
                         </div>
                     </div>
 
+                    {showLandingModule && (
+                        <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                            <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Default Landing Module</label>
+                            <p className={`text-[10px] mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Which module to open first after signing in.</p>
+                            <select value={landingModule} onChange={(e) => setLandingModule(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}>
+                                <option value="">Admin Hub (Default)</option>
+                                <option value="frontdesk">Front Desk</option>
+                                <option value="technician">Technician Portal</option>
+                            </select>
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                             <label className={labelClass}>Email (Locked)</label>
                             <input type="text" disabled value={email} className={disabledClass} />
                         </div>
                         <div>
-                            <label className={labelClass}>Username (Locked)</label>
-                            <input type="text" disabled value={username} className={disabledClass} />
+                            <label className={labelClass}>Username (Login Handle)</label>
+                            <input type="text" required value={usernameInput} onChange={(e) => setUsernameInput(e.target.value)} className={inputClass} />
                         </div>
                     </div>
 

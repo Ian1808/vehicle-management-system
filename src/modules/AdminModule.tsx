@@ -384,9 +384,20 @@ export default function AdminModule() {
         if (!currentUserId) return { ok: false, error: 'Not authenticated.' }
 
         try {
+            if (!payload.username.trim()) return { ok: false, error: 'Username cannot be empty.' }
+
+            const { data: existingUsername } = await supabase
+                .from('users')
+                .select('id')
+                .eq('username', payload.username)
+                .neq('id', currentUserId)
+                .maybeSingle()
+
+            if (existingUsername) return { ok: false, error: 'That username is already taken.' }
+
             const { error: profileError } = await supabase
                 .from('users')
-                .update({ full_name: payload.fullName })
+                .update({ full_name: payload.fullName, username: payload.username })
                 .eq('id', currentUserId)
 
             if (profileError) throw profileError
@@ -412,6 +423,7 @@ export default function AdminModule() {
             }
 
             setSettingsFullName(payload.fullName)
+            setSettingsUsername(payload.username)
             showToast('Admin settings & security updated successfully!', 'success')
             return { ok: true }
         } catch (err: any) {
@@ -699,6 +711,7 @@ export default function AdminModule() {
                     username={settingsUsername}
                     fullName={settingsFullName}
                     accent="purple"
+                    showLandingModule
                     onClose={() => setShowSettingsModal(false)}
                     onSave={handleSettingsSave}
                 />
@@ -875,9 +888,11 @@ export default function AdminModule() {
                                             onChange={(e) => handleStatusOverride(selectedVehicle.id, e.target.value)}
                                             className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
                                         >
+                                            <option value="intake">Intake</option>
                                             <option value="pending_before_photos">Pending Before Photos</option>
                                             <option value="in_repair">In Repair</option>
                                             <option value="pending_after_photos">Pending After Photos</option>
+                                            <option value="completed">Completed</option>
                                             <option value="road_ready">Road Ready</option>
                                         </select>
                                     </div>

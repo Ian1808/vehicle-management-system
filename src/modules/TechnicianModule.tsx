@@ -135,7 +135,18 @@ export default function TechnicianModule() {
     async function handleSettingsSave(payload: AccountSettingsPayload): Promise<{ ok: boolean; error?: string }> {
         if (!currentUserId) return { ok: false, error: 'Not authenticated.' }
         try {
-            await supabase.from('users').update({ full_name: payload.fullName }).eq('id', currentUserId)
+            if (!payload.username.trim()) return { ok: false, error: 'Username cannot be empty.' }
+
+            const { data: existingUsername } = await supabase
+                .from('users')
+                .select('id')
+                .eq('username', payload.username)
+                .neq('id', currentUserId)
+                .maybeSingle()
+
+            if (existingUsername) return { ok: false, error: 'That username is already taken.' }
+
+            await supabase.from('users').update({ full_name: payload.fullName, username: payload.username }).eq('id', currentUserId)
 
             if (payload.newPassword.trim()) {
                 if (!payload.oldPassword.trim()) {
@@ -154,6 +165,7 @@ export default function TechnicianModule() {
             }
 
             setSettingsFullName(payload.fullName)
+            setSettingsUsername(payload.username)
             showToast('Settings & security updated successfully!', 'success')
             return { ok: true }
         } catch (err) {
