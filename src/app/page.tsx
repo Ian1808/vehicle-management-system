@@ -3,8 +3,12 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import Link from 'next/link'
-import { fetchActiveVehicles, insertVehicle } from '@/services/vehicleService'
+import { addWatermarkToFile } from '@/utils/watermark'
+import { fetchActiveVehicles, fetchVehicleMedia, insertVehicle } from '@/services/vehicleService'
 import VehicleIntakeModal from '@/components/forms/VehicleIntakeModal'
+import ConfirmModal from '@/components/ui/ConfirmModal'
+import PreviewModal from '@/components/ui/PreviewModal'
+import Toast from '@/components/ui/Toast'
 
 type Vehicle = {
   id: string
@@ -19,18 +23,67 @@ type Vehicle = {
   created_at: string
 }
 
-type Toast = {
+type MediaItem = {
+  id: string
+  category: string
+  file_url: string
+  media_type: string
+  vehicle_id: string
+}
+
+type ToastState = {
   message: string
   type: 'success' | 'error'
-}
+} | null
+
+type ConfirmState = {
+  title: string
+  message: string
+  confirmText?: string
+  confirmVariant?: 'primary' | 'danger' | 'success'
+  onConfirm: () => void
+} | null
+
+type PreviewState = {
+  url: string
+  title: string
+} | null
+
+const PHOTO_CATEGORIES = [
+  { key: 'front', label: 'Front View' },
+  { key: 'back', label: 'Back View' },
+  { key: 'left', label: 'Left Side' },
+  { key: 'right', label: 'Right Side' },
+  { key: 'windshield', label: 'Front Windshield' },
+  { key: 'meter_gauge', label: 'Meter Gauge' },
+  { key: 'engine_bay', label: 'Engine Bay' },
+  { key: 'chassis_number', label: 'Chassis Number (VIN)' },
+]
 
 export default function FrontDeskDashboard() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
+  const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
+  const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
-  const [toast, setToast] = useState<Toast | null>(null)
-  const [showModal, setShowModal] = useState(false)
   const [userRole, setUserRole] = useState('front_desk')
+
+  // Modals & UI State
+  const [showModal, setShowModal] = useState(false)
+  const [showSettingsModal, setShowSettingsModal] = useState(false)
+  const [uploadingCategory, setUploadingCategory] = useState<string | null>(null)
+  const [toast, setToast] = useState<ToastState>(null)
+  const [confirmModal, setConfirmModal] = useState<ConfirmState>(null)
+  const [previewMedia, setPreviewMedia] = useState<PreviewState>(null)
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+
+  // User Settings State
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [currentUserEmail, setCurrentUserEmail] = useState<string>('')
+  const [settingsFullName, setSettingsFullName] = useState('')
+  const [settingsUsername, setSettingsUsername] = useState('')
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
 
   const supabase = createClient()
   const isDark = theme === 'dark'
@@ -49,23 +102,49 @@ export default function FrontDeskDashboard() {
           return
         }
 
+        setCurrentUserId(user.id)
+        setCurrentUserEmail(user.email || '')
+
         const { data: userData } = await supabase
           .from('users')
-          .select('role')
+          .select('role, full_name, username')
           .eq('id', user.id)
           .single()
 
+        if (userData && userData.role !== 'front_desk' && userData.role !== 'admin') {
+          showToast('Access Denied: Front Desk / Admin only.', 'error')
+          setTimeout(() => { window.location.href = '/technician' }, 1500)
+          return
+        }
+
         setUserRole(userData?.role || 'front_desk')
-        const activeVehicles = await fetchActiveVehicles()
-        setVehicles(activeVehicles)
+        setSettingsFullName(userData?.full_name || '')
+        setSettingsUsername(userData?.username || '')
+
+        const list = await fetchActiveVehicles()
+        setVehicles(list)
       } catch (err: any) {
-        showToast(err.message || 'Failed to load dashboard', 'error')
+        showToast(err.message || 'Initialization failed', 'error')
       } finally {
         setLoading(false)
       }
     }
     init()
   }, [])
+
+  useEffect(() => {
+    async function loadMedia() {
+      if (selectedVehicle) {
+        try {
+          const media = await fetchVehicleMedia(selectedVehicle.id)
+          setMediaItems(media)
+        } catch (err: any) {
+          showToast('Failed to load media items', 'error')
+        }
+      }
+    }
+    loadMedia()
+  }, [selectedVehicle?.id])
 
   async function handleCreateVehicle(data: {
     plate_number: string
@@ -76,30 +155,117 @@ export default function FrontDeskDashboard() {
     market_value: number
   }) {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      await insertVehicle({
-        ...data,
-        created_by: user?.id
-      })
+      await insertVehicle({ ...data, created_by: currentUserId })
       showToast('Vehicle successfully registered!', 'success')
       setShowModal(false)
-      const activeVehicles = await fetchActiveVehicles()
-      setVehicles(activeVehicles)
+      const list = await fetchActiveVehicles()
+      setVehicles(list)
     } catch (err: any) {
-      showToast(err.message || 'Failed to register vehicle', 'error')
+      showToast(err.message || 'Failed to save vehicle', 'error')
     }
   }
 
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>, category: string) {
+    const file = e.target.files?.[0]
+    if (!file || !selectedVehicle) return
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('File is too large. Maximum size is 5MB.', 'error')
+      e.target.value = ''
+      return
+    }
+
+    const categoryLabel = category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
+
+    setConfirmModal({
+      title: 'Confirm Document Upload',
+      message: `Watermark and upload "${file.name}" for ${categoryLabel}?`,
+      confirmText: 'Upload Document',
+      confirmVariant: 'primary',
+      onConfirm: () => executeFileUpload(file, category),
+    })
+    e.target.value = ''
+  }
+
+  async function executeFileUpload(file: File, category: string) {
+    setConfirmModal(null)
+    if (!selectedVehicle) return
+
+    setUploadingCategory(category)
+    showToast(`Watermarking & uploading ${category.toUpperCase()}...`, 'success')
+
+    try {
+      const watermarkLabel = `CONFIDENTIAL • ${selectedVehicle.plate_number} • ${category.toUpperCase()} • ${new Date().toLocaleDateString()}`
+      const fileToUpload = await addWatermarkToFile(file, watermarkLabel)
+
+      const existing = mediaItems.find(m => m.media_type === 'document' && m.category === category)
+      if (existing) {
+        await supabase.from('vehicle_media').delete().eq('id', existing.id)
+      }
+
+      const fileExt = fileToUpload.name.split('.').pop()?.toLowerCase() || 'jpg'
+      const fileName = `${selectedVehicle.id}/docs/${category}_${Date.now()}.${fileExt}`
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('vehicle-files')
+        .upload(fileName, fileToUpload, { cacheControl: '3600', upsert: true })
+
+      if (uploadError) throw uploadError
+
+      const { data: publicURLData } = supabase.storage.from('vehicle-files').getPublicUrl(uploadData.path)
+
+      await supabase.from('vehicle_media').insert([{
+        vehicle_id: selectedVehicle.id,
+        media_type: 'document',
+        category: category,
+        file_url: publicURLData.publicUrl,
+      }])
+
+      showToast('Document stored successfully!', 'success')
+      const updatedMedia = await fetchVehicleMedia(selectedVehicle.id)
+      setMediaItems(updatedMedia)
+    } catch (err: any) {
+      showToast(err.message || 'Upload failed', 'error')
+    } finally {
+      setUploadingCategory(null)
+    }
+  }
+
+  async function handleDownload(url: string, title: string) {
+    try {
+      const res = await fetch(url)
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = `${title.toLowerCase().replace(/[^a-z0-9]/g, '_')}`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(blobUrl)
+    } catch {
+      window.open(url, '_blank')
+    }
+  }
+
+  const technicianPhotos = mediaItems.filter(m => m.media_type.startsWith('photo_'))
+  const additionalPhotos = mediaItems.filter(m => m.media_type === 'photo_additional')
+
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
-      {toast && (
-        <div className="fixed top-6 right-6 z-50 animate-bounce">
-          <div className={`px-5 py-3 rounded-2xl shadow-2xl text-xs font-bold flex items-center gap-3 border ${toast.type === 'success' ? 'bg-emerald-950 text-emerald-200 border-emerald-700' : 'bg-rose-950 text-rose-200 border-rose-700'}`}>
-            <span>{toast.type === 'success' ? '✨' : '⚠️'}</span>
-            <span>{toast.message}</span>
-          </div>
-        </div>
+      {toast && <Toast message={toast.message} type={toast.type} />}
+      {confirmModal && (
+        <ConfirmModal
+          title={confirmModal.title}
+          message={confirmModal.message}
+          confirmText={confirmModal.confirmText}
+          confirmVariant={confirmModal.confirmVariant}
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+          isDark={isDark}
+        />
       )}
+      <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} isDark={isDark} />
 
       <header className={`border-b sticky top-0 z-40 backdrop-blur-md ${isDark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'}`}>
         <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
@@ -107,7 +273,7 @@ export default function FrontDeskDashboard() {
             <div className="w-9 h-9 rounded-2xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-black">🚗</div>
             <div>
               <h1 className="text-base font-extrabold tracking-tight">Vehicle Management System</h1>
-              <p className="text-[11px] text-slate-400">Modular Front Desk Dashboard</p>
+              <p className="text-[11px] text-slate-400">Front Desk Dashboard</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -117,52 +283,165 @@ export default function FrontDeskDashboard() {
             {userRole === 'admin' && (
               <Link href="/admin" className="font-bold px-3.5 py-2 rounded-xl text-xs border border-purple-800 bg-purple-950 text-purple-300">🛡️ Admin Hub</Link>
             )}
-            <button onClick={() => setShowModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-lg cursor-pointer">
-              + New Vehicle Intake
-            </button>
+            <button onClick={() => setShowSettingsModal(true)} className="font-semibold px-3.5 py-2 rounded-xl text-xs border border-slate-700 bg-slate-800 text-slate-200 cursor-pointer">⚙️ Settings</button>
+            {!selectedVehicle && (
+              <button onClick={() => setShowModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-lg cursor-pointer">
+                + New Vehicle Intake
+              </button>
+            )}
+            <button onClick={async () => { await supabase.auth.signOut(); window.location.href = '/login'; }} className="font-bold px-3.5 py-2 rounded-xl text-xs border border-rose-900 bg-rose-950 text-rose-300 cursor-pointer">Sign Out</button>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-black tracking-tight">Active Vehicle Registry</h2>
-          <span className="text-xs font-bold px-3.5 py-1.5 rounded-full border border-slate-700 bg-slate-800 text-slate-300">Total: {vehicles.length} Vehicles</span>
-        </div>
+        {selectedVehicle ? (
+          <div>
+            <button onClick={() => setSelectedVehicle(null)} className="mb-6 text-xs font-bold px-3.5 py-2 rounded-xl border border-slate-800 bg-slate-950 text-blue-400 cursor-pointer">
+              &larr; Back to Registry
+            </button>
 
-        {loading ? (
-          <div className="p-16 text-center text-slate-500 font-medium">Loading modular registry...</div>
-        ) : vehicles.length === 0 ? (
-          <div className="p-16 text-center text-slate-500 font-medium">No vehicles found. Click "+ New Vehicle Intake" to get started.</div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {vehicles.map((v) => (
-              <div key={v.id} className="border border-slate-800 bg-slate-950 rounded-3xl p-6 shadow-xl flex flex-col justify-between">
+            <div className="border border-slate-800 bg-slate-950 rounded-3xl p-8 mb-8 shadow-2xl">
+              <div className="flex justify-between items-center pb-6 border-b border-slate-800">
                 <div>
-                  <div className="flex justify-between items-start mb-3">
-                    <h3 className="text-xl font-black text-blue-400">{v.plate_number}</h3>
-                    <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-amber-950 text-amber-300 border border-amber-800">
-                      {v.status.replace(/_/g, ' ')}
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-3xl font-black text-white">{selectedVehicle.plate_number}</h2>
+                    <span className="px-3.5 py-1 rounded-full text-[11px] font-bold uppercase bg-amber-950 text-amber-300 border border-amber-800">
+                      {selectedVehicle.status.replace(/_/g, ' ')}
                     </span>
                   </div>
-                  <p className="text-xs font-semibold text-slate-300 mb-2">{v.make_model_year}</p>
-                  <p className="text-[11px] font-mono text-slate-500 mb-4">VIN: {v.chassis_number}</p>
+                  <p className="mt-1 font-semibold text-sm text-slate-400">{selectedVehicle.make_model_year}</p>
+                  <p className="text-xs font-mono mt-2 inline-block px-3 py-1 rounded-xl bg-slate-900 border border-slate-800 text-slate-400">
+                    VIN: <span className="text-white">{selectedVehicle.chassis_number}</span>
+                  </p>
                 </div>
-                <div className="pt-4 border-t border-slate-900 flex justify-between items-center">
-                  <span className="text-xs font-bold text-slate-400">Intake Cost: <span className="text-white">RM {v.intake_cost?.toLocaleString()}</span></span>
+                <div className="px-4 py-3 rounded-2xl bg-slate-900 border border-slate-800">
+                  <p className="text-[10px] uppercase text-slate-400 font-extrabold tracking-wider">Insurance Panel</p>
+                  <p className="text-sm font-bold text-white mt-0.5">{selectedVehicle.insurance_panel || 'None Assigned'}</p>
                 </div>
               </div>
-            ))}
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 py-6 border-b border-slate-800">
+                <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900">
+                  <p className="text-[11px] font-bold text-slate-400 uppercase">Intake Cost</p>
+                  <p className="text-2xl font-black text-white mt-1">RM {selectedVehicle.intake_cost?.toLocaleString()}</p>
+                </div>
+                <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900">
+                  <p className="text-[11px] font-bold text-slate-400 uppercase">Market Value</p>
+                  <p className="text-2xl font-black text-white mt-1">RM {selectedVehicle.market_value?.toLocaleString()}</p>
+                </div>
+                <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900">
+                  <p className="text-[11px] font-bold text-slate-400 uppercase">Total Repair Cost</p>
+                  <p className="text-2xl font-black text-white mt-1">RM {selectedVehicle.repair_cost?.toLocaleString()}</p>
+                </div>
+              </div>
+
+              {/* Mandatory Documents Section */}
+              <div className="pt-6 pb-8 border-b border-slate-800">
+                <h3 className="text-sm font-extrabold mb-4 tracking-wider uppercase text-white">1. Mandatory Document Management</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {['grant', 'jpj', 'insurance', 'ber'].map((cat) => {
+                    const doc = mediaItems.find(m => m.media_type === 'document' && m.category === cat)
+                    const label = cat === 'grant' ? 'Vehicle Grant (VOC)' : cat === 'jpj' ? 'JPJ Inspection' : cat === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
+                    return (
+                      <div key={cat} className="border border-slate-800 bg-slate-900 rounded-2xl p-5 flex flex-col justify-between">
+                        <div>
+                          <p className="text-xs font-extrabold uppercase text-white mb-1">{label}</p>
+                          <p className={`text-xs font-semibold mb-5 ${doc ? 'text-emerald-400' : 'text-slate-500'}`}>{doc ? '✓ Verified & Stored' : 'Pending Upload'}</p>
+                        </div>
+                        {doc ? (
+                          <button onClick={() => setPreviewMedia({ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${label}` })} className="w-full bg-blue-950 text-blue-300 hover:bg-blue-900 py-2.5 rounded-xl text-xs font-bold border border-blue-800 cursor-pointer">View Document</button>
+                        ) : (
+                          <div>
+                            <label htmlFor={`file-${cat}`} className="w-full block text-center bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow-md">Upload File</label>
+                            <input id={`file-${cat}`} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => handleFileSelect(e, cat)} />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Technician Photo Evidence Section */}
+              <div className="pt-8">
+                <h3 className="text-sm font-extrabold tracking-wider uppercase text-white mb-4">2. Technician Photo Evidence (Read-Only)</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {PHOTO_CATEGORIES.map((cat) => {
+                    const before = mediaItems.find(m => m.media_type === 'photo_before' && m.category === cat.key)
+                    const after = mediaItems.find(m => m.media_type === 'photo_after' && m.category === cat.key)
+                    return (
+                      <div key={cat.key} className="border border-slate-800 bg-slate-900/70 rounded-2xl p-4">
+                        <p className="text-xs font-extrabold uppercase text-white mb-3">{cat.label}</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="border border-slate-800 bg-slate-950 rounded-xl p-3 flex flex-col justify-between">
+                            <p className="text-[10px] font-bold uppercase text-amber-400 mb-1">Before Repair</p>
+                            <p className={`text-[11px] mb-3 ${before ? 'text-emerald-400' : 'text-slate-500'}`}>{before ? '✓ Captured' : 'Pending'}</p>
+                            {before && <button onClick={() => setPreviewMedia({ url: before.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })} className="w-full py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-emerald-400 border border-slate-700 cursor-pointer">View</button>}
+                          </div>
+                          <div className="border border-slate-800 bg-slate-950 rounded-xl p-3 flex flex-col justify-between">
+                            <p className="text-[10px] font-bold uppercase text-blue-400 mb-1">After Repair</p>
+                            <p className={`text-[11px] mb-3 ${after ? 'text-blue-400' : 'text-slate-500'}`}>{after ? '✓ Captured' : 'Pending'}</p>
+                            {after && <button onClick={() => setPreviewMedia({ url: after.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })} className="w-full py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-blue-400 border border-slate-700 cursor-pointer">View</button>}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-black tracking-tight">Active Vehicle Registry</h2>
+              <span className="text-xs font-bold px-3.5 py-1.5 rounded-full border border-slate-700 bg-slate-800 text-slate-300">Total: {vehicles.length} Vehicles</span>
+            </div>
+
+            {loading ? (
+              <div className="p-16 text-center text-slate-500 font-medium">Loading vehicle registry...</div>
+            ) : vehicles.length === 0 ? (
+              <div className="p-16 text-center text-slate-500 font-medium">No vehicles found. Click "+ New Vehicle Intake" to get started.</div>
+            ) : (
+              <div className="border border-slate-800 bg-slate-950 rounded-3xl shadow-xl overflow-hidden">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="text-[11px] uppercase font-bold text-slate-400 border-b border-slate-800 bg-slate-900/80">
+                      <th className="p-4.5">Plate Number</th>
+                      <th className="p-4.5">Make / Model / Year</th>
+                      <th className="p-4.5">Insurance Panel</th>
+                      <th className="p-4.5">Status</th>
+                      <th className="p-4.5">Intake Cost</th>
+                      <th className="p-4.5 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800 text-xs font-medium text-slate-300">
+                    {vehicles.map((v) => (
+                      <tr key={v.id} className="hover:bg-slate-900/50 transition-colors">
+                        <td className="p-4.5 font-bold text-sm text-blue-400">{v.plate_number}</td>
+                        <td className="p-4.5">{v.make_model_year}</td>
+                        <td className="p-4.5 text-slate-400">{v.insurance_panel || 'N/A'}</td>
+                        <td className="p-4.5">
+                          <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-amber-950 text-amber-300 border border-amber-800 capitalize">
+                            {v.status.replace(/_/g, ' ')}
+                          </span>
+                        </td>
+                        <td className="p-4.5 font-bold text-white">RM {v.intake_cost?.toLocaleString()}</td>
+                        <td className="p-4.5 text-right">
+                          <button onClick={() => setSelectedVehicle(v)} className="px-3.5 py-1.5 rounded-xl font-bold bg-blue-950 text-blue-300 border border-blue-800 hover:bg-blue-900 cursor-pointer">Inspect Details &rarr;</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </main>
 
-      <VehicleIntakeModal
-        isOpen={showModal}
-        onClose={() => setShowModal(false)}
-        onSubmit={handleCreateVehicle}
-        isDark={isDark}
-      />
+      <VehicleIntakeModal isOpen={showModal} onClose={() => setShowModal(false)} onSubmit={handleCreateVehicle} isDark={isDark} />
     </div>
   )
 }

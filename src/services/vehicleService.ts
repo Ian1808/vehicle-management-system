@@ -13,6 +13,16 @@ export async function fetchActiveVehicles() {
     return data || []
 }
 
+export async function fetchVehicleMedia(vehicleId: string) {
+    const { data, error } = await supabase
+        .from('vehicle_media')
+        .select('*')
+        .eq('vehicle_id', vehicleId)
+
+    if (error) throw new Error(error.message)
+    return data || []
+}
+
 export async function insertVehicle(vehicleData: {
     plate_number: string
     chassis_number: string
@@ -32,4 +42,15 @@ export async function insertVehicle(vehicleData: {
 
     if (error) throw new Error(error.message)
     return true
+}
+
+export async function deleteDocumentRecord(vehicleId: string, category: string) {
+    const { error } = await supabase
+        .from('vehicle_media')
+        .delete()
+        .eq('vehicle_id', vehicleId)
+        .eq('category', category)
+        .eq('media_type', 'document')
+
+    if (error) throw new Error(error.message)
 }
