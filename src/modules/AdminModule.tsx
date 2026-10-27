@@ -995,6 +995,7 @@ export default function AdminModule() {
                             ))}
                         </div>
 
+                        <div className="hidden md:block">
                         <ResponsiveTable isDark={isDark} minWidth="min-w-[760px]">
                             <thead>
                                 <tr className={`border-b text-xs font-extrabold uppercase tracking-wider ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700'}`}>
@@ -1073,6 +1074,72 @@ export default function AdminModule() {
                                 )}
                             </tbody>
                         </ResponsiveTable>
+                        </div>
+
+                        {/* Mobile card list */}
+                        <div className="md:hidden space-y-3">
+                            {filteredUsers.length === 0 ? (
+                                <div className={`border rounded-2xl p-8 text-center text-xs font-semibold ${isDark ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-500'}`}>
+                                    No staff accounts found matching this filter.
+                                </div>
+                            ) : (
+                                filteredUsers.map((u) => (
+                                    <div key={u.id} className={`border rounded-2xl p-4 flex flex-col gap-3 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div className="min-w-0">
+                                                <p className={`font-black text-sm truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{u.full_name || 'N/A'}</p>
+                                                <p className={`text-[11px] font-mono truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>@{u.username} {u.email ? `• ${u.email}` : ''}</p>
+                                            </div>
+                                            <span className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${u.is_suspended
+                                                    ? 'bg-rose-950 text-rose-300 border-rose-800'
+                                                    : 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                                                }`}>
+                                                {u.is_suspended ? 'Suspended' : 'Active'}
+                                            </span>
+                                        </div>
+                                        <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                            Last login: {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never logged in'}
+                                        </p>
+                                        <select
+                                            value={u.role}
+                                            onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
+                                            className={`w-full border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer capitalize ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                                        >
+                                            <option value="admin">Administrator</option>
+                                            <option value="front_desk">Front Desk</option>
+                                            <option value="technician">Technician</option>
+                                            <option value="bidder">Bidder</option>
+                                        </select>
+                                        <div className="flex flex-wrap gap-2">
+                                            <button
+                                                onClick={() => setEditingPasswordUser(u)}
+                                                className="flex-1 bg-purple-950 hover:bg-purple-900 text-purple-300 px-3 py-2 rounded-xl text-xs font-bold border border-purple-800 cursor-pointer transition-colors"
+                                                title="Change Password"
+                                            >
+                                                🔑 Password
+                                            </button>
+                                            <button
+                                                onClick={() => handleToggleSuspendUser(u.id, Boolean(u.is_suspended), u.full_name)}
+                                                className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${u.is_suspended
+                                                        ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800'
+                                                        : 'bg-amber-950 hover:bg-amber-900 text-amber-300 border-amber-800'
+                                                    }`}
+                                                title={u.is_suspended ? 'Reactivate Account' : 'Suspend Account'}
+                                            >
+                                                {u.is_suspended ? '🟢 Activate' : '🟡 Suspend'}
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeleteUser(u.id, u.full_name)}
+                                                className="bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer transition-colors"
+                                                title="Remove Account"
+                                            >
+                                                🗑️
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
                     </div>
                 )}
 

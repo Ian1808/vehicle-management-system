@@ -709,6 +709,8 @@ export default function TechnicianModule() {
                         ) : vehicles.length === 0 ? (
                             <EmptyState isDark={isDark} message="No vehicles currently assigned to the workshop queue." />
                         ) : (
+                            <>
+                            <div className="hidden md:block">
                             <ResponsiveTable isDark={isDark} minWidth="min-w-[640px]">
                                 <thead>
                                     <tr className={`text-[11px] uppercase font-bold border-b ${isDark ? 'text-slate-400 border-slate-800 bg-slate-900/80' : 'text-slate-500 border-slate-200 bg-slate-100'}`}>
@@ -735,6 +737,24 @@ export default function TechnicianModule() {
                                     ))}
                                 </tbody>
                             </ResponsiveTable>
+                            </div>
+
+                            {/* Mobile card list */}
+                            <div className="md:hidden space-y-3">
+                                {vehicles.map((v) => (
+                                    <div key={v.id} className={`border rounded-2xl p-4 flex flex-col gap-3 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="text-sm font-bold text-emerald-400">{v.plate_number}</span>
+                                            <StatusBadge status={v.status} />
+                                        </div>
+                                        <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{v.make_model_year}</p>
+                                        <button onClick={() => setSelectedVehicle(v)} className="w-full px-3.5 py-2.5 rounded-xl font-bold bg-emerald-950 text-emerald-300 border border-emerald-800 hover:bg-emerald-900 cursor-pointer text-xs">
+                                            Capture Evidence &rarr;
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                            </>
                         )}
                     </div>
                 )}

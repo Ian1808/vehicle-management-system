@@ -580,7 +580,9 @@ export default function FrontDeskModule() {
             ) : vehicles.length === 0 ? (
               <EmptyState isDark={isDark} message="No vehicles found. Click “+ New Vehicle Intake” to get started." />
             ) : (
-              <ResponsiveTable isDark={isDark} minWidth="min-w-[760px]">
+              <>
+                <div className="hidden md:block">
+                  <ResponsiveTable isDark={isDark} minWidth="min-w-[760px]">
                 <thead>
                   <tr className={`text-[11px] uppercase font-bold border-b ${isDark ? 'text-slate-400 border-slate-800 bg-slate-900/80' : 'text-slate-500 border-slate-200 bg-slate-100'}`}>
                     <th className="p-4">Plate Number</th>
@@ -608,6 +610,28 @@ export default function FrontDeskModule() {
                   ))}
                 </tbody>
               </ResponsiveTable>
+                </div>
+
+                {/* Mobile card list */}
+                <div className="md:hidden space-y-3">
+                  {vehicles.map((v) => (
+                    <div key={v.id} className={`border rounded-2xl p-4 flex flex-col gap-3 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-bold text-blue-400">{v.plate_number}</span>
+                        <StatusBadge status={v.status} />
+                      </div>
+                      <div className={`text-xs space-y-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        <p className="font-semibold">{v.make_model_year}</p>
+                        <p>Insurance: {v.insurance_panel || 'N/A'}</p>
+                        <p className="font-bold text-white">RM {v.intake_cost?.toLocaleString()}</p>
+                      </div>
+                      <button onClick={() => setSelectedVehicle(v)} className="w-full px-3.5 py-2.5 rounded-xl font-bold bg-blue-950 text-blue-300 border border-blue-800 hover:bg-blue-900 cursor-pointer text-xs">
+                        Inspect Details &rarr;
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
         )}
