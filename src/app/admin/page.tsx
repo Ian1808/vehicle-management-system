@@ -32,7 +32,8 @@ type UserProfile = {
     username: string
     full_name: string
     role: string
-    last_sign_in_at?: string
+    last_login?: string
+    created_at?: string
 }
 
 type MediaItem = {
@@ -93,6 +94,14 @@ export default function AdminHub() {
     const [bankAcceptsBer, setBankAcceptsBer] = useState(false)
     const [bankAcceptsRefinance, setBankAcceptsRefinance] = useState(false)
     const [bankNotesInput, setBankNotesInput] = useState('')
+
+    // New Staff User Modal State
+    const [showUserModal, setShowUserModal] = useState(false)
+    const [newUserEmail, setNewUserEmail] = useState('')
+    const [newUserPassword, setNewUserPassword] = useState('')
+    const [newUserFullName, setNewUserFullName] = useState('')
+    const [newUserRole, setNewUserRole] = useState('front_desk')
+    const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'front_desk' | 'technician'>('all')
 
     // Theme State ('dark' | 'light')
     const [theme, setTheme] = useState<'dark' | 'light'>('dark')
@@ -275,6 +284,66 @@ export default function AdminHub() {
         setShowBankModal(true)
     }
 
+    async function handleCreateStaffUser(e: React.FormEvent) {
+        e.preventDefault()
+        if (!newUserEmail.trim() || !newUserPassword.trim() || !newUserFullName.trim()) return
+
+        try {
+            const { data, error } = await supabase.auth.signUp({
+                email: newUserEmail.trim(),
+                password: newUserPassword.trim(),
+                options: {
+                    data: {
+                        full_name: newUserFullName.trim(),
+                        role: newUserRole,
+                    },
+                },
+            })
+
+            if (error) throw error
+
+            if (data.user) {
+                await supabase
+                    .from('users')
+                    .update({ role: newUserRole, full_name: newUserFullName.trim() })
+                    .eq('id', data.user.id)
+            }
+
+            showToast('Staff member registered successfully!', 'success')
+            setShowUserModal(false)
+            setNewUserEmail('')
+            setNewUserPassword('')
+            setNewUserFullName('')
+            setNewUserRole('front_desk')
+            fetchUsers()
+        } catch (err: any) {
+            showToast(err.message || 'Failed to create staff account.', 'error')
+        }
+    }
+
+    async function handleDeleteUser(userId: string, name: string) {
+        setConfirmModal({
+            title: 'Confirm Account Removal',
+            message: `Are you sure you want to remove staff account "${name}"? This action cannot be undone.`,
+            confirmText: 'Remove Staff',
+            confirmVariant: 'danger',
+            onConfirm: async () => {
+                setConfirmModal(null)
+                const { error } = await supabase
+                    .from('users')
+                    .delete()
+                    .eq('id', userId)
+
+                if (error) {
+                    showToast('Error removing user: ' + error.message, 'error')
+                } else {
+                    showToast('Staff account removed successfully.', 'success')
+                    fetchUsers()
+                }
+            }
+        })
+    }
+
     async function handleUpdateSettings(e: React.FormEvent) {
         e.preventDefault()
         if (!currentUserId) return
@@ -447,6 +516,9 @@ export default function AdminHub() {
     const totalFleetMarketValue = vehicles.reduce((acc, v) => acc + Number(v.market_value || 0), 0)
     const totalProjectedProfit = totalFleetMarketValue - (totalFleetIntakeCost + totalFleetRepairCost)
 
+    // Filtered Users
+    const filteredUsers = users.filter(u => userRoleFilter === 'all' || u.role === userRoleFilter)
+
     return (
         <div className={`min-h-screen pb-16 relative selection:bg-purple-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
             {toast && (
@@ -492,6 +564,88 @@ export default function AdminHub() {
                                 {confirmModal.confirmText || 'Confirm'}
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Add Staff User Modal */}
+            {showUserModal && (
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+                    <div className={`border rounded-3xl shadow-2xl max-w-md w-full p-8 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
+                        <div className="flex justify-between items-center mb-6">
+                            <div>
+                                <h3 className={`text-lg font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>Register New Staff Member</h3>
+                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Create credentials and assign initial operational permissions.</p>
+                            </div>
+                            <button onClick={() => setShowUserModal(false)} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}>&times;</button>
+                        </div>
+
+                        <form onSubmit={handleCreateStaffUser} className="space-y-4">
+                            <div>
+                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Full Name *</label>
+                                <input
+                                    type="text"
+                                    required
+                                    placeholder="e.g. Ahmad bin Ali"
+                                    value={newUserFullName}
+                                    onChange={(e) => setNewUserFullName(e.target.value)}
+                                    className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                />
+                            </div>
+
+                            <div>
+                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Email Address *</label>
+                                <input
+                                    type="email"
+                                    required
+                                    placeholder="staff@workshop.com"
+                                    value={newUserEmail}
+                                    onChange={(e) => setNewUserEmail(e.target.value)}
+                                    className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                />
+                            </div>
+
+                            <div>
+                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Temporary Password *</label>
+                                <input
+                                    type="password"
+                                    required
+                                    placeholder="••••••••"
+                                    value={newUserPassword}
+                                    onChange={(e) => setNewUserPassword(e.target.value)}
+                                    className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                />
+                            </div>
+
+                            <div>
+                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Role Assignment *</label>
+                                <select
+                                    value={newUserRole}
+                                    onChange={(e) => setNewUserRole(e.target.value)}
+                                    className={`w-full border rounded-xl p-3 text-xs font-bold focus:ring-2 focus:ring-purple-500 focus:outline-none cursor-pointer capitalize ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                >
+                                    <option value="front_desk">Front Desk</option>
+                                    <option value="technician">Technician</option>
+                                    <option value="admin">Administrator</option>
+                                </select>
+                            </div>
+
+                            <div className="flex justify-end gap-3 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowUserModal(false)}
+                                    className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${isDark ? 'text-slate-300 bg-slate-800 hover:bg-slate-700 border-slate-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200'}`}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
+                                >
+                                    Create Staff Account
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}
@@ -1024,11 +1178,33 @@ export default function AdminHub() {
                 {/* TAB 2: USER & STAFF MANAGEMENT */}
                 {activeTab === 'users' && (
                     <div>
-                        <div className="flex justify-between items-center mb-6">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
                             <div>
                                 <h2 className={`text-xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Staff Account & Role Governance</h2>
-                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Modify staff roles between Administrator, Front Desk, and Workshop Technician.</p>
+                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Register new staff, assign roles, and monitor account activity.</p>
                             </div>
+                            <button
+                                onClick={() => setShowUserModal(true)}
+                                className="bg-purple-600 hover:bg-purple-500 text-white px-5 py-2.5 rounded-2xl text-xs font-bold shadow-lg transition-all cursor-pointer"
+                            >
+                                + Register New Staff
+                            </button>
+                        </div>
+
+                        {/* Role Filter Pills */}
+                        <div className="flex gap-2 mb-6">
+                            {(['all', 'admin', 'front_desk', 'technician'] as const).map((roleKey) => (
+                                <button
+                                    key={roleKey}
+                                    onClick={() => setUserRoleFilter(roleKey)}
+                                    className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all cursor-pointer border ${userRoleFilter === roleKey
+                                            ? 'bg-purple-600 text-white border-purple-500 shadow-md'
+                                            : isDark ? 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                                        }`}
+                                >
+                                    {roleKey.replace('_', ' ')} ({roleKey === 'all' ? users.length : users.filter(u => u.role === roleKey).length})
+                                </button>
+                            ))}
                         </div>
 
                         <div className={`rounded-3xl border overflow-hidden shadow-xl ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
@@ -1036,35 +1212,52 @@ export default function AdminHub() {
                                 <table className="w-full text-left border-collapse">
                                     <thead>
                                         <tr className={`border-b text-xs font-extrabold uppercase tracking-wider ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700'}`}>
-                                            <th className="p-4">Full Name</th>
-                                            <th className="p-4">Username / ID</th>
+                                            <th className="p-4">Full Name & Email</th>
+                                            <th className="p-4">User ID</th>
                                             <th className="p-4">Current Role</th>
-                                            <th className="p-4 text-right">Change Role</th>
+                                            <th className="p-4">Last Activity</th>
+                                            <th className="p-4 text-right">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
-                                        {users.map((u) => (
-                                            <tr key={u.id} className={`transition-colors ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
-                                                <td className={`p-4 font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{u.full_name || 'N/A'}</td>
-                                                <td className="p-4 font-mono text-slate-400">{u.username || u.id}</td>
-                                                <td className="p-4">
-                                                    <span className="px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-purple-950 text-purple-300 border border-purple-800/60">
-                                                        {u.role}
-                                                    </span>
-                                                </td>
-                                                <td className="p-4 text-right">
-                                                    <select
-                                                        value={u.role}
-                                                        onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
-                                                        className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
-                                                    >
-                                                        <option value="admin">admin</option>
-                                                        <option value="front_desk">front_desk</option>
-                                                        <option value="technician">technician</option>
-                                                    </select>
-                                                </td>
+                                        {filteredUsers.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={5} className="p-12 text-center text-slate-500">No staff accounts found matching this filter.</td>
                                             </tr>
-                                        ))}
+                                        ) : (
+                                            filteredUsers.map((u) => (
+                                                <tr key={u.id} className={`transition-colors ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
+                                                    <td className="p-4">
+                                                        <p className={`font-black text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{u.full_name || 'N/A'}</p>
+                                                        <p className="text-slate-400 text-[11px] font-mono mt-0.5">{u.username}</p>
+                                                    </td>
+                                                    <td className="p-4 font-mono text-slate-400 text-[11px] max-w-[150px] truncate">{u.id}</td>
+                                                    <td className="p-4">
+                                                        <select
+                                                            value={u.role}
+                                                            onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
+                                                            className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer capitalize ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                                                        >
+                                                            <option value="admin">Administrator</option>
+                                                            <option value="front_desk">Front Desk</option>
+                                                            <option value="technician">Technician</option>
+                                                        </select>
+                                                    </td>
+                                                    <td className="p-4 text-slate-400 text-[11px]">
+                                                        {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never logged in'}
+                                                    </td>
+                                                    <td className="p-4 text-right">
+                                                        <button
+                                                            onClick={() => handleDeleteUser(u.id, u.full_name)}
+                                                            className="bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer transition-colors"
+                                                            title="Remove Account"
+                                                        >
+                                                            🗑️ Remove
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
                                     </tbody>
                                 </table>
                             </div>
