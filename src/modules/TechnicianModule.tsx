@@ -314,11 +314,12 @@ export default function TechnicianModule() {
         }
     }
 
-    const beforeCount = mediaItems.filter(m => m.media_type === 'photo_before').length
-    const afterCount = mediaItems.filter(m => m.media_type === 'photo_after').length
+    const totalAngles = PHOTO_CATEGORIES.length
+    const beforeCapturedAngles = PHOTO_CATEGORIES.filter(c => mediaItems.some(m => m.media_type === 'photo_before' && m.category === c.key)).length
+    const afterCapturedAngles = PHOTO_CATEGORIES.filter(c => mediaItems.some(m => m.media_type === 'photo_after' && m.category === c.key)).length
     const additionalPhotos = mediaItems.filter(m => m.media_type === 'photo_additional')
-    const allBeforeCaptured = PHOTO_CATEGORIES.every(c => mediaItems.some(m => m.media_type === 'photo_before' && m.category === c.key))
-    const allAfterCaptured = PHOTO_CATEGORIES.every(c => mediaItems.some(m => m.media_type === 'photo_after' && m.category === c.key))
+    const allBeforeCaptured = beforeCapturedAngles === totalAngles
+    const allAfterCaptured = afterCapturedAngles === totalAngles
     const stage = selectedVehicle ? getPhotoStageRules(selectedVehicle.status) : null
     const beforeMode = stage?.before ?? 'readonly'
     const afterMode = stage?.after ?? 'readonly'
@@ -329,7 +330,7 @@ export default function TechnicianModule() {
     function handleStartRepair() {
         if (!selectedVehicle) return
         if (!allBeforeCaptured) {
-            showToast(`Cannot start repair — ${8 - beforeCount} 'Before' photo(s) still missing. All 8 angles are required.`, 'error')
+            showToast(`Cannot start repair — ${totalAngles - beforeCapturedAngles} 'Before' photo(s) still missing. All ${totalAngles} angles are required.`, 'error')
             return
         }
         setConfirmModal({
@@ -373,7 +374,7 @@ export default function TechnicianModule() {
     function handleCompleteVehicle() {
         if (!selectedVehicle) return
         if (!allAfterCaptured) {
-            showToast(`Cannot mark completed — ${8 - afterCount} 'After' photo(s) still missing. All 8 angles are required.`, 'error')
+            showToast(`Cannot mark completed — ${totalAngles - afterCapturedAngles} 'After' photo(s) still missing. All ${totalAngles} angles are required.`, 'error')
             return
         }
         setConfirmModal({
@@ -537,13 +538,13 @@ export default function TechnicianModule() {
                             {selectedVehicle.status === 'pending_before_photos' && !allBeforeCaptured && (
                                 <div className={`mt-6 px-5 py-3.5 rounded-2xl border flex items-center gap-3 text-xs font-bold ${isDark ? 'bg-amber-950/60 border-amber-800/70 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
                                     <span>⚠️</span>
-                                    <span>Incomplete: {beforeCount}/8 ‘Before’ photos captured. All 8 angles required.</span>
+                                    <span>Incomplete: {beforeCapturedAngles}/{totalAngles} ‘Before’ photos captured. All {totalAngles} angles required.</span>
                                 </div>
                             )}
                             {selectedVehicle.status === 'pending_after_photos' && !allAfterCaptured && (
                                 <div className={`mt-6 px-5 py-3.5 rounded-2xl border flex items-center gap-3 text-xs font-bold ${isDark ? 'bg-amber-950/60 border-amber-800/70 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
                                     <span>⚠️</span>
-                                    <span>Incomplete: {afterCount}/8 ‘After’ photos captured. All 8 angles required.</span>
+                                    <span>Incomplete: {afterCapturedAngles}/{totalAngles} ‘After’ photos captured. All {totalAngles} angles required.</span>
                                 </div>
                             )}
 
@@ -575,7 +576,7 @@ export default function TechnicianModule() {
                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                         <h3 className={`text-sm font-extrabold tracking-wider uppercase ${isDark ? 'text-white' : 'text-slate-900'}`}>Workshop Inspection Evidence (8 Angles)</h3>
                                         <span className={`text-[11px] font-bold px-3 py-1 rounded-full border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
-                                            {showBeforeSection && `Before ${beforeCount}/8`}{showBeforeSection && showAfterSection && ' · '}{showAfterSection && `After ${afterCount}/8`}
+                                            {showBeforeSection && `Before ${beforeCapturedAngles}/${totalAngles}`}{showBeforeSection && showAfterSection && ' · '}{showAfterSection && `After ${afterCapturedAngles}/${totalAngles}`}
                                         </span>
                                     </div>
 

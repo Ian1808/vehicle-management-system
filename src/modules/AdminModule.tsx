@@ -86,6 +86,15 @@ function adminDocumentLabel(category: string): string {
     return category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
 }
 
+const STATUS_LABELS: Record<string, string> = {
+    intake: 'Intake',
+    pending_before_photos: 'Pending Before Photos',
+    in_repair: 'In Repair',
+    pending_after_photos: 'Pending After Photos',
+    completed: 'Completed',
+    road_ready: 'Road Ready',
+}
+
 export default function AdminModule() {
     const [activeTab, setActiveTab] = useState<'vehicles' | 'users' | 'banks' | 'trash'>('vehicles')
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
@@ -451,6 +460,22 @@ export default function AdminModule() {
                     fetchUsers()
                 }
             }
+        })
+    }
+
+    function requestStatusOverride(newStatus: string) {
+        if (!selectedVehicle || newStatus === selectedVehicle.status) return
+        const fromLabel = STATUS_LABELS[selectedVehicle.status] || selectedVehicle.status
+        const toLabel = STATUS_LABELS[newStatus] || newStatus
+        setConfirmModal({
+            title: 'Confirm Status Override',
+            message: `Override ${selectedVehicle.plate_number} status from "${fromLabel}" to "${toLabel}"? This bypasses the normal repair flow.`,
+            confirmText: `Set to ${toLabel}`,
+            confirmVariant: 'success',
+            onConfirm: async () => {
+                setConfirmModal(null)
+                await handleStatusOverride(selectedVehicle.id, newStatus)
+            },
         })
     }
 
@@ -885,7 +910,7 @@ export default function AdminModule() {
                                         <span className="text-xs font-black uppercase text-purple-400">Admin Override Status:</span>
                                         <select
                                             value={selectedVehicle.status}
-                                            onChange={(e) => handleStatusOverride(selectedVehicle.id, e.target.value)}
+                                            onChange={(e) => requestStatusOverride(e.target.value)}
                                             className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
                                         >
                                             <option value="intake">Intake</option>
