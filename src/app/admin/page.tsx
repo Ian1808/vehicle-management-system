@@ -18,6 +18,15 @@ type Vehicle = {
     created_at: string
 }
 
+type Bank = {
+    id: string
+    bank_name: string
+    accepts_ber: boolean
+    accepts_refinance: boolean
+    notes: string
+    updated_at: string
+}
+
 type UserProfile = {
     id: string
     username: string
@@ -64,9 +73,10 @@ const PHOTO_CATEGORIES = [
 ]
 
 export default function AdminHub() {
-    const [activeTab, setActiveTab] = useState<'vehicles' | 'users' | 'trash'>('vehicles')
+    const [activeTab, setActiveTab] = useState<'vehicles' | 'users' | 'banks' | 'trash'>('vehicles')
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [deletedVehicles, setDeletedVehicles] = useState<Vehicle[]>([])
+    const [banks, setBanks] = useState<Bank[]>([])
     const [users, setUsers] = useState<UserProfile[]>([])
     const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
@@ -75,6 +85,14 @@ export default function AdminHub() {
     const [toast, setToast] = useState<Toast | null>(null)
     const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null)
     const [previewMedia, setPreviewMedia] = useState<PreviewMedia | null>(null)
+
+    // New Bank Modal State
+    const [showBankModal, setShowBankModal] = useState(false)
+    const [editingBank, setEditingBank] = useState<Bank | null>(null)
+    const [bankNameInput, setBankNameInput] = useState('')
+    const [bankAcceptsBer, setBankAcceptsBer] = useState(false)
+    const [bankAcceptsRefinance, setBankAcceptsRefinance] = useState(false)
+    const [bankNotesInput, setBankNotesInput] = useState('')
 
     // Theme State ('dark' | 'light')
     const [theme, setTheme] = useState<'dark' | 'light'>('dark')
@@ -137,6 +155,7 @@ export default function AdminHub() {
         await Promise.all([
             fetchVehicles(),
             fetchDeletedVehicles(),
+            fetchBanks(),
             fetchUsers()
         ])
         setLoading(false)
@@ -164,6 +183,19 @@ export default function AdminHub() {
         else setDeletedVehicles(data || [])
     }
 
+    async function fetchBanks() {
+        const { data, error } = await supabase
+            .from('banks')
+            .select('*')
+            .order('bank_name', { ascending: true })
+
+        if (error) {
+            console.warn('Banks table might not exist yet:', error.message)
+        } else {
+            setBanks(data || [])
+        }
+    }
+
     async function fetchUsers() {
         const { data, error } = await supabase
             .from('users')
@@ -187,6 +219,60 @@ export default function AdminHub() {
     const selectVehicle = (v: Vehicle) => {
         setSelectedVehicle(v)
         fetchMedia(v.id)
+    }
+
+    async function handleSaveBank(e: React.FormEvent) {
+        e.preventDefault()
+        if (!bankNameInput.trim()) return
+
+        try {
+            if (editingBank) {
+                const { error } = await supabase
+                    .from('banks')
+                    .update({
+                        bank_name: bankNameInput.trim(),
+                        accepts_ber: bankAcceptsBer,
+                        accepts_refinance: bankAcceptsRefinance,
+                        notes: bankNotesInput.trim(),
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', editingBank.id)
+
+                if (error) throw error
+                showToast('Bank criteria updated successfully!', 'success')
+            } else {
+                const { error } = await supabase
+                    .from('banks')
+                    .insert([{
+                        bank_name: bankNameInput.trim(),
+                        accepts_ber: bankAcceptsBer,
+                        accepts_refinance: bankAcceptsRefinance,
+                        notes: bankNotesInput.trim(),
+                    }])
+
+                if (error) throw error
+                showToast('New bank added successfully!', 'success')
+            }
+
+            setShowBankModal(false)
+            setEditingBank(null)
+            setBankNameInput('')
+            setBankAcceptsBer(false)
+            setBankAcceptsRefinance(false)
+            setBankNotesInput('')
+            fetchBanks()
+        } catch (err: any) {
+            showToast(err.message || 'Failed to save bank record.', 'error')
+        }
+    }
+
+    function openEditBankModal(b: Bank) {
+        setEditingBank(b)
+        setBankNameInput(b.bank_name)
+        setBankAcceptsBer(b.accepts_ber)
+        setBankAcceptsRefinance(b.accepts_refinance)
+        setBankNotesInput(b.notes || '')
+        setShowBankModal(true)
     }
 
     async function handleUpdateSettings(e: React.FormEvent) {
@@ -355,6 +441,12 @@ export default function AdminHub() {
 
     const isDark = theme === 'dark'
 
+    // Calculate Financial Metrics
+    const totalFleetIntakeCost = vehicles.reduce((acc, v) => acc + Number(v.intake_cost || 0), 0)
+    const totalFleetRepairCost = vehicles.reduce((acc, v) => acc + Number(v.repair_cost || 0), 0)
+    const totalFleetMarketValue = vehicles.reduce((acc, v) => acc + Number(v.market_value || 0), 0)
+    const totalProjectedProfit = totalFleetMarketValue - (totalFleetIntakeCost + totalFleetRepairCost)
+
     return (
         <div className={`min-h-screen pb-16 relative selection:bg-purple-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
             {toast && (
@@ -400,6 +492,82 @@ export default function AdminHub() {
                                 {confirmModal.confirmText || 'Confirm'}
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Add / Edit Bank Modal */}
+            {showBankModal && (
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+                    <div className={`border rounded-3xl shadow-2xl max-w-md w-full p-8 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className={`text-lg font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                                {editingBank ? 'Edit Bank Policy' : 'Add New Panel Bank'}
+                            </h3>
+                            <button onClick={() => setShowBankModal(false)} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}>&times;</button>
+                        </div>
+
+                        <form onSubmit={handleSaveBank} className="space-y-4">
+                            <div>
+                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Bank Name *</label>
+                                <input
+                                    type="text"
+                                    required
+                                    placeholder="e.g. Maybank / CIMB"
+                                    value={bankNameInput}
+                                    onChange={(e) => setBankNameInput(e.target.value)}
+                                    className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3 pt-2">
+                                <label className={`flex items-center gap-2.5 p-3 rounded-2xl border cursor-pointer ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                    <input
+                                        type="checkbox"
+                                        checked={bankAcceptsBer}
+                                        onChange={(e) => setBankAcceptsBer(e.target.checked)}
+                                        className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                                    />
+                                    <span className="text-xs font-bold">Accepts BER</span>
+                                </label>
+                                <label className={`flex items-center gap-2.5 p-3 rounded-2xl border cursor-pointer ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                    <input
+                                        type="checkbox"
+                                        checked={bankAcceptsRefinance}
+                                        onChange={(e) => setBankAcceptsRefinance(e.target.checked)}
+                                        className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                                    />
+                                    <span className="text-xs font-bold">Accepts Refinance</span>
+                                </label>
+                            </div>
+
+                            <div>
+                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Internal Admin Notes / Criteria</label>
+                                <textarea
+                                    rows={3}
+                                    placeholder="e.g. Requires 3 months seasoning and original grant..."
+                                    value={bankNotesInput}
+                                    onChange={(e) => setBankNotesInput(e.target.value)}
+                                    className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                />
+                            </div>
+
+                            <div className="flex justify-end gap-3 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowBankModal(false)}
+                                    className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${isDark ? 'text-slate-300 bg-slate-800 hover:bg-slate-700 border-slate-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200'}`}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
+                                >
+                                    Save Bank Record
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}
@@ -615,8 +783,28 @@ export default function AdminHub() {
             </header>
 
             <main className="max-w-7xl mx-auto px-6 py-8">
+                {/* Financial Fleet Summary Analytics Bar */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                    <div className={`border rounded-3xl p-5 shadow-lg ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Total Fleet Intake Cost</p>
+                        <p className="text-xl font-black text-rose-400">RM {totalFleetIntakeCost.toLocaleString()}</p>
+                    </div>
+                    <div className={`border rounded-3xl p-5 shadow-lg ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Total Repair Outlay</p>
+                        <p className="text-xl font-black text-amber-400">RM {totalFleetRepairCost.toLocaleString()}</p>
+                    </div>
+                    <div className={`border rounded-3xl p-5 shadow-lg ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Total Market Value</p>
+                        <p className="text-xl font-black text-blue-400">RM {totalFleetMarketValue.toLocaleString()}</p>
+                    </div>
+                    <div className={`border rounded-3xl p-5 shadow-lg ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Projected Net Profit</p>
+                        <p className="text-xl font-black text-emerald-400">RM {totalProjectedProfit.toLocaleString()}</p>
+                    </div>
+                </div>
+
                 {/* Navigation Tabs */}
-                <div className="flex gap-3 mb-8 border-b pb-4 border-slate-800/40">
+                <div className="flex flex-wrap gap-3 mb-8 border-b pb-4 border-slate-800/40">
                     <button
                         onClick={() => { setActiveTab('vehicles'); setSelectedVehicle(null); }}
                         className={`px-5 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer border ${activeTab === 'vehicles'
@@ -634,6 +822,15 @@ export default function AdminHub() {
                             }`}
                     >
                         👥 Staff & User Management ({users.length})
+                    </button>
+                    <button
+                        onClick={() => { setActiveTab('banks'); setSelectedVehicle(null); }}
+                        className={`px-5 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer border ${activeTab === 'banks'
+                                ? 'bg-purple-600 text-white border-purple-500 shadow-md'
+                                : isDark ? 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                    >
+                        🏦 Panel Bank Criteria ({banks.length})
                     </button>
                     <button
                         onClick={() => { setActiveTab('trash'); setSelectedVehicle(null); }}
@@ -875,7 +1072,59 @@ export default function AdminHub() {
                     </div>
                 )}
 
-                {/* TAB 3: TRASH / RECOVERY */}
+                {/* TAB 3: PANEL BANK CRITERIA */}
+                {activeTab === 'banks' && (
+                    <div>
+                        <div className="flex justify-between items-center mb-6">
+                            <div>
+                                <h2 className={`text-xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Panel Bank Criteria Management</h2>
+                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Configure which banks accept BER (Beyond Economic Repair) and Refinance cases.</p>
+                            </div>
+                            <button
+                                onClick={() => { setEditingBank(null); setBankNameInput(''); setBankAcceptsBer(false); setBankAcceptsRefinance(false); setBankNotesInput(''); setShowBankModal(true); }}
+                                className="bg-purple-600 hover:bg-purple-500 text-white px-5 py-2.5 rounded-2xl text-xs font-bold shadow-lg transition-all cursor-pointer"
+                            >
+                                + Add New Bank
+                            </button>
+                        </div>
+
+                        {banks.length === 0 ? (
+                            <div className={`p-16 text-center rounded-3xl border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-600'}`}>
+                                No panel banks configured yet. Click "+ Add New Bank" to get started.
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                                {banks.map((b) => (
+                                    <div key={b.id} className={`border rounded-3xl p-6 flex flex-col justify-between shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                                        <div>
+                                            <h3 className="text-lg font-black tracking-tight mb-3">{b.bank_name}</h3>
+                                            <div className="flex gap-2 mb-4">
+                                                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${b.accepts_ber ? 'bg-emerald-950 text-emerald-300 border-emerald-800/60' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>
+                                                    {b.accepts_ber ? '✓ Accepts BER' : '✗ No BER'}
+                                                </span>
+                                                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${b.accepts_refinance ? 'bg-blue-950 text-blue-300 border-blue-800/60' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>
+                                                    {b.accepts_refinance ? '✓ Accepts Refinance' : '✗ No Refinance'}
+                                                </span>
+                                            </div>
+                                            <p className={`text-xs font-medium p-3 rounded-2xl border mb-6 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                                                {b.notes || 'No specific notes recorded.'}
+                                            </p>
+                                        </div>
+
+                                        <button
+                                            onClick={() => openEditBankModal(b)}
+                                            className="w-full bg-slate-800 hover:bg-slate-700 text-purple-300 py-2.5 rounded-xl text-xs font-bold transition-all border border-slate-700 cursor-pointer"
+                                        >
+                                            Edit Bank Criteria &rarr;
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* TAB 4: TRASH / RECOVERY */}
                 {activeTab === 'trash' && (
                     <div>
                         <div className="flex justify-between items-center mb-6">
