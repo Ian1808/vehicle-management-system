@@ -18,6 +18,7 @@ import ChangePasswordModal from '@/components/admin/ChangePasswordModal'
 import BankModal, { type BankPayload, type BankRecord } from '@/components/admin/BankModal'
 import VehicleAuditGrid from '@/components/admin/VehicleAuditGrid'
 import AdditionalPhotosGrid from '@/components/admin/AdditionalPhotosGrid'
+import { getPhotoStageRules } from '@/lib/photoStages'
 
 type Vehicle = {
     id: string
@@ -547,6 +548,11 @@ export default function AdminModule() {
         trash: deletedVehicles.length,
     }
 
+    const adminStage = selectedVehicle ? getPhotoStageRules(selectedVehicle.status) : null
+    const adminShowBefore = adminStage?.before !== 'hidden'
+    const adminShowAfter = adminStage?.after !== 'hidden'
+    const adminShowAdditional = adminStage?.additional !== 'hidden'
+
     return (
         <div className={`min-h-screen pb-16 relative selection:bg-purple-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
             {toast && <Toast message={toast.message} type={toast.type} isDark={isDark} />}
@@ -788,30 +794,36 @@ export default function AdminModule() {
                         </Card>
 
                         <div className="space-y-8">
-                            <VehicleAuditGrid
-                                isDark={isDark}
-                                title={`Technician "Before" Photos (${mediaItems.filter(m => m.media_type === 'photo_before').length}/8 Captured)`}
-                                mediaItems={mediaItems}
-                                phase="before"
-                                vehiclePlate={selectedVehicle.plate_number}
-                                onView={(url, title) => setPreviewMedia({ url, title })}
-                            />
+                            {adminShowBefore && (
+                                <VehicleAuditGrid
+                                    isDark={isDark}
+                                    title={`Technician "Before" Photos (${mediaItems.filter(m => m.media_type === 'photo_before').length}/8 Captured)`}
+                                    mediaItems={mediaItems}
+                                    phase="before"
+                                    vehiclePlate={selectedVehicle.plate_number}
+                                    onView={(url, title) => setPreviewMedia({ url, title })}
+                                />
+                            )}
 
-                            <VehicleAuditGrid
-                                isDark={isDark}
-                                title={`Technician "After" Photos (${mediaItems.filter(m => m.media_type === 'photo_after').length}/8 Captured)`}
-                                mediaItems={mediaItems}
-                                phase="after"
-                                vehiclePlate={selectedVehicle.plate_number}
-                                onView={(url, title) => setPreviewMedia({ url, title })}
-                            />
+                            {adminShowAfter && (
+                                <VehicleAuditGrid
+                                    isDark={isDark}
+                                    title={`Technician "After" Photos (${mediaItems.filter(m => m.media_type === 'photo_after').length}/8 Captured)`}
+                                    mediaItems={mediaItems}
+                                    phase="after"
+                                    vehiclePlate={selectedVehicle.plate_number}
+                                    onView={(url, title) => setPreviewMedia({ url, title })}
+                                />
+                            )}
 
-                            <AdditionalPhotosGrid
-                                isDark={isDark}
-                                mediaItems={mediaItems}
-                                vehiclePlate={selectedVehicle.plate_number}
-                                onView={(url, title) => setPreviewMedia({ url, title })}
-                            />
+                            {adminShowAdditional && (
+                                <AdditionalPhotosGrid
+                                    isDark={isDark}
+                                    mediaItems={mediaItems}
+                                    vehiclePlate={selectedVehicle.plate_number}
+                                    onView={(url, title) => setPreviewMedia({ url, title })}
+                                />
+                            )}
                         </div>
                     </div>
                 )}

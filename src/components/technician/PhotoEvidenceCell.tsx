@@ -4,13 +4,14 @@ type PhotoEvidenceCellProps = {
     isDark: boolean
     phase: 'before' | 'after'
     isCaptured: boolean
+    readonly?: boolean
     onView: () => void
     onRemove: () => void
     onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void
     inputId: string
 }
 
-export default function PhotoEvidenceCell({ isDark, phase, isCaptured, onView, onRemove, onFileChange, inputId }: PhotoEvidenceCellProps) {
+export default function PhotoEvidenceCell({ isDark, phase, isCaptured, readonly = false, onView, onRemove, onFileChange, inputId }: PhotoEvidenceCellProps) {
     const phaseTitle = phase === 'before' ? 'Before Repair' : 'After Repair'
     const phaseColor = phase === 'before' ? 'text-amber-400' : 'text-blue-400'
     const viewColor = phase === 'before'
@@ -25,19 +26,23 @@ export default function PhotoEvidenceCell({ isDark, phase, isCaptured, onView, o
             </div>
             <div className="space-y-2">
                 {isCaptured && (
+                    <button onClick={onView} className={`w-full py-2 rounded-lg text-xs font-bold border cursor-pointer ${viewColor}`}>
+                        View Photo
+                    </button>
+                )}
+                {!readonly && isCaptured && (
+                    <button onClick={onRemove} className={`w-full py-2 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
+                        Remove
+                    </button>
+                )}
+                {!readonly && (
                     <>
-                        <button onClick={onView} className={`w-full py-2 rounded-lg text-xs font-bold border cursor-pointer ${viewColor}`}>
-                            View Photo
-                        </button>
-                        <button onClick={onRemove} className={`w-full py-2 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
-                            Remove
-                        </button>
+                        <label htmlFor={inputId} className="w-full block text-center py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow">
+                            {isCaptured ? 'Retake' : 'Upload'}
+                        </label>
+                        <input id={inputId} type="file" accept="image/*" className="hidden" onChange={onFileChange} />
                     </>
                 )}
-                <label htmlFor={inputId} className="w-full block text-center py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow">
-                    {isCaptured ? 'Retake' : 'Upload'}
-                </label>
-                <input id={inputId} type="file" accept="image/*" className="hidden" onChange={onFileChange} />
             </div>
         </div>
     )

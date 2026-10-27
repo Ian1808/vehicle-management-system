@@ -8,6 +8,7 @@ import { fetchActiveVehicles, fetchVehicleMedia, insertVehicle, updateVehicleSta
 import { useTheme } from '@/lib/theme'
 import { PHOTO_CATEGORIES } from '@/lib/photoCategories'
 import { uniqueFileSuffix } from '@/lib/uploadUtils'
+import { getPhotoStageRules } from '@/lib/photoStages'
 import VehicleIntakeModal from '@/components/forms/VehicleIntakeModal'
 import ConfirmModal from '@/components/ui/ConfirmModal'
 import PreviewModal from '@/components/ui/PreviewModal'
@@ -67,6 +68,10 @@ export default function FrontDeskModule() {
   const [loading, setLoading] = useState(true)
   const [userRole, setUserRole] = useState('front_desk')
   const additionalPhotos = mediaItems.filter(m => m.media_type === 'photo_additional')
+  const photoStage = selectedVehicle ? getPhotoStageRules(selectedVehicle.status) : null
+  const showBefore = photoStage?.before !== 'hidden'
+  const showAfter = photoStage?.after !== 'hidden'
+  const showAdditional = photoStage?.additional !== 'hidden'
 
   // Modals & UI State
   const [showModal, setShowModal] = useState(false)
@@ -491,52 +496,60 @@ export default function FrontDeskModule() {
               </div>
 
               {/* Technician Photo Evidence Section */}
-              <div className="pt-8">
-                <h3 className={`text-sm font-extrabold tracking-wider uppercase mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>2. Technician Photo Evidence (Read-Only)</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {PHOTO_CATEGORIES.map((cat) => {
-                    const before = mediaItems.find(m => m.media_type === 'photo_before' && m.category === cat.key)
-                    const after = mediaItems.find(m => m.media_type === 'photo_after' && m.category === cat.key)
-                    return (
-                      <div key={cat.key} className={`border rounded-2xl p-4 ${isDark ? 'border-slate-800 bg-slate-900/70' : 'border-slate-200 bg-slate-50'}`}>
-                        <p className={`text-xs font-extrabold uppercase mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>{cat.label}</p>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
-                            <p className="text-[10px] font-bold uppercase text-amber-400 mb-1">Before Repair</p>
-                            <p className={`text-[11px] mb-3 ${before ? 'text-emerald-400' : 'text-slate-500'}`}>{before ? '✓ Captured' : 'Pending'}</p>
-                            {before && <button onClick={() => setPreviewMedia({ url: before.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })} className={`w-full py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-slate-900 text-emerald-400 border-slate-700' : 'bg-white text-emerald-600 border-slate-200'}`}>View</button>}
-                          </div>
-                          <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
-                            <p className="text-[10px] font-bold uppercase text-blue-400 mb-1">After Repair</p>
-                            <p className={`text-[11px] mb-3 ${after ? 'text-blue-400' : 'text-slate-500'}`}>{after ? '✓ Captured' : 'Pending'}</p>
-                            {after && <button onClick={() => setPreviewMedia({ url: after.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })} className={`w-full py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-slate-900 text-blue-400 border-slate-700' : 'bg-white text-blue-600 border-slate-200'}`}>View</button>}
+              {(showBefore || showAfter) && (
+                <div className="pt-8">
+                  <h3 className={`text-sm font-extrabold tracking-wider uppercase mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>2. Technician Photo Evidence (Read-Only)</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {PHOTO_CATEGORIES.map((cat) => {
+                      const before = mediaItems.find(m => m.media_type === 'photo_before' && m.category === cat.key)
+                      const after = mediaItems.find(m => m.media_type === 'photo_after' && m.category === cat.key)
+                      return (
+                        <div key={cat.key} className={`border rounded-2xl p-4 ${isDark ? 'border-slate-800 bg-slate-900/70' : 'border-slate-200 bg-slate-50'}`}>
+                          <p className={`text-xs font-extrabold uppercase mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>{cat.label}</p>
+                          <div className={`grid gap-3 ${showBefore && showAfter ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                            {showBefore && (
+                              <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
+                                <p className="text-[10px] font-bold uppercase text-amber-400 mb-1">Before Repair</p>
+                                <p className={`text-[11px] mb-3 ${before ? 'text-emerald-400' : 'text-slate-500'}`}>{before ? '✓ Captured' : 'Pending'}</p>
+                                {before && <button onClick={() => setPreviewMedia({ url: before.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })} className={`w-full py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-slate-900 text-emerald-400 border-slate-700' : 'bg-white text-emerald-600 border-slate-200'}`}>View</button>}
+                              </div>
+                            )}
+                            {showAfter && (
+                              <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
+                                <p className="text-[10px] font-bold uppercase text-blue-400 mb-1">After Repair</p>
+                                <p className={`text-[11px] mb-3 ${after ? 'text-blue-400' : 'text-slate-500'}`}>{after ? '✓ Captured' : 'Pending'}</p>
+                                {after && <button onClick={() => setPreviewMedia({ url: after.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })} className={`w-full py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-slate-900 text-blue-400 border-slate-700' : 'bg-white text-blue-600 border-slate-200'}`}>View</button>}
+                              </div>
+                            )}
                           </div>
                         </div>
-                      </div>
-                    )
-                  })}
+                      )
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Additional Evidence Photos Section */}
-              <div className={`pt-8 mt-8 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                <h3 className={`text-sm font-extrabold tracking-wider uppercase mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>3. Additional Evidence Photos (Read-Only)</h3>
-                {additionalPhotos.length === 0 ? (
-                  <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No additional photos uploaded by technician.</p>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {additionalPhotos.map((item) => (
-                      <div key={item.id} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-900/70' : 'border-slate-200 bg-slate-50'}`}>
-                        <div>
-                          <p className={`text-xs font-extrabold uppercase mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{additionalLabel(item.category)}</p>
-                          <p className="text-[11px] font-semibold text-purple-400 mb-3">✓ Captured</p>
+              {showAdditional && (
+                <div className={`pt-8 mt-8 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                  <h3 className={`text-sm font-extrabold tracking-wider uppercase mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>3. Additional Evidence Photos (Read-Only)</h3>
+                  {additionalPhotos.length === 0 ? (
+                    <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No additional photos uploaded by technician.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {additionalPhotos.map((item) => (
+                        <div key={item.id} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-900/70' : 'border-slate-200 bg-slate-50'}`}>
+                          <div>
+                            <p className={`text-xs font-extrabold uppercase mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{additionalLabel(item.category)}</p>
+                            <p className="text-[11px] font-semibold text-purple-400 mb-3">✓ Captured</p>
+                          </div>
+                          <button onClick={() => setPreviewMedia({ url: item.file_url, title: `${selectedVehicle.plate_number} - ${additionalLabel(item.category)} (Additional)` })} className={`w-full py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-slate-900 text-purple-300 border-slate-700' : 'bg-white text-purple-600 border-slate-200'}`}>View</button>
                         </div>
-                        <button onClick={() => setPreviewMedia({ url: item.file_url, title: `${selectedVehicle.plate_number} - ${additionalLabel(item.category)} (Additional)` })} className={`w-full py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-slate-900 text-purple-300 border-slate-700' : 'bg-white text-purple-600 border-slate-200'}`}>View</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </Card>
           </div>
         ) : (
