@@ -83,7 +83,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                         <input
                             type="text"
                             required
-                            placeholder="e.g. WPH925 or VFE9578"
+                            placeholder="e.g. ABC1234"
                             value={plate}
                             onChange={(e) => handlePlateChange(e.target.value)}
                             className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${plateError ? 'border-rose-500 bg-rose-950/25 text-rose-300' : 'border-slate-800 bg-slate-950 text-white'}`}
@@ -93,7 +93,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
 
                     <div>
                         <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Chassis Number (VIN) *</label>
-                        <input type="text" required placeholder="e.g. PMAL123456789" value={chassis} onChange={(e) => setChassis(e.target.value.toUpperCase())} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-medium bg-slate-950 text-white uppercase" />
+                        <input type="text" required placeholder="" value={chassis} onChange={(e) => setChassis(e.target.value.toUpperCase())} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-medium bg-slate-950 text-white uppercase" />
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
