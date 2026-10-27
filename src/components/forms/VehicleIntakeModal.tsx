@@ -17,53 +17,110 @@ function normalizeKey(s: string) {
     return s.toUpperCase().replace(/[^A-Z0-9]/g, '')
 }
 
-function windowAfter(text: string, label: RegExp, maxLen: number): string {
-    const idx = text.search(label)
-    if (idx === -1) return ''
-    return text.slice(idx, idx + maxLen)
-}
-
-// Parses OCR text from a Malaysian vehicle grant (SIJIL PEMILIKAN KENDERAAN)
-// by anchoring on the known Malay field labels.
+// Parses OCR text from a Malaysian vehicle grant (SIJIL PEMILIKAN KENDERAAN).
+// Works line-by-line with fuzzy label matching because Tesseract often
+// mangles the Malay field names — a value may also sit on the next line.
 function parseGrantText(raw: string): ParsedGrant {
-    const text = raw.toUpperCase().replace(/\s+/g, ' ')
+    const lines = raw
+        .toUpperCase()
+        .replace(/\r/g, '')
+        .split('\n')
+        .map(l => l.replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
     const result: ParsedGrant = { plate: '', chassis: '', make: '', model: '', spec: '', year: '' }
 
-    const plateMatch = text.match(/PENDAFTARAN[\s\S]{0,80}?([A-Z]{1,3}\s?\d{1,4}[A-Z]?)/)
-    if (plateMatch) result.plate = plateMatch[1].replace(/\s/g, '')
-
-    const chassisMatch = text.match(/(?:CHASIS|CHASSIS)[\s\S]{0,90}?([A-Z0-9]{12,20})/)
-    if (chassisMatch) result.chassis = chassisMatch[1]
-
-    let mmChunk = windowAfter(text, /(?:BUATAN|NAMA MODEL)/, 170)
-    const mmLabelEnd = mmChunk.search(/NAMA MODEL/)
-    if (mmLabelEnd !== -1) {
-        mmChunk = mmChunk.slice(mmLabelEnd + 'NAMA MODEL'.length)
-    } else {
-        mmChunk = mmChunk.replace(/^BUATAN/, '')
+    const findValue = (linePredicate: (l: string) => boolean, valuePattern: RegExp): string => {
+        for (let i = 0; i < lines.length; i++) {
+            if (!linePredicate(lines[i])) continue
+            for (let j = 0; j <= 2; j++) {
+                const m = (lines[i + j] || '').match(valuePattern)
+                if (m) return m[1]
+            }
+            return ''
+        }
+        return ''
     }
-    mmChunk = mmChunk.split(/\s+(?:KUUP|KUASA|BAHAN|PEMASANGAN|KELAS|JENIS|TARIKH|SYARAT|STATUS|B\.?D\.?)/)[0].trim()
-    const mmParts = mmChunk.split('/').map(s => s.trim()).filter(Boolean)
-    if (mmParts.length >= 2) {
-        result.make = mmParts[0]
-        result.model = mmParts.slice(1).join(' / ')
-    } else {
-        const tokens = mmChunk.split(/\s+/).filter(Boolean)
-        if (tokens.length >= 2) {
-            result.make = tokens[0]
-            result.model = tokens.slice(1).join(' ')
+
+    result.plate = findValue(
+        l => l.includes('PENDAFTARAN') && !l.includes('TARIKH'),
+        /([A-Z]{1,3}\s?\d{1,4}[A-Z]?)/
+    )
+    result.chassis = findValue(
+        l => l.includes('CHASIS') || l.includes('CHASSIS'),
+        /([A-Z0-9]{12,20})/
+    )
+    result.year = findValue(
+        l => l.includes('TAHUN') || l.includes('DIBUAT'),
+        /((?:19|20)\d{2})/
+    )
+    result.spec = findValue(
+        l => (l.includes('KUUP') || l.includes('KUASA')) && l.includes('ENJIN'),
+        /(\d{3,4})/
+    )
+
+    const mmLineIdx = lines.findIndex(l => l.includes('BUATAN') || l.includes('NAMA MODEL') || l.includes('MODEL'))
+    if (mmLineIdx !== -1) {
+        let mmText = ''
+        for (let j = 0; j <= 2; j++) mmText += ' ' + (lines[mmLineIdx + j] || '')
+        mmText = mmText
+            .replace(/BUATAN/g, ' ')
+            .replace(/NAMA MODEL/g, ' ')
+            .replace(/MODEL/g, ' ')
+            .trim()
+        mmText = mmText.split(/\s+(?:KUUP|KUASA|BAHAN|PEMASANGAN|KELAS|JENIS|TARIKH|SYARAT|STATUS|B\.?D\.?)/)[0].trim()
+        const mmParts = mmText.split('/').map(s => s.trim()).filter(Boolean)
+        if (mmParts.length >= 2) {
+            result.make = mmParts[0]
+            result.model = mmParts.slice(1).join(' / ')
         } else {
-            result.model = tokens[0] || ''
+            const tokens = mmText.split(/\s+/).filter(Boolean)
+            if (tokens.length >= 2) {
+                result.make = tokens[0]
+                result.model = tokens.slice(1).join(' ')
+            } else {
+                result.model = tokens[0] || ''
+            }
         }
     }
 
-    const yearMatch = text.match(/TAHUN DIBUAT[\s\S]{0,80}?((?:19|20)\d{2})/)
-    if (yearMatch) result.year = yearMatch[1]
-
-    const engineMatch = text.match(/(?:KUUP|KUASA)[A-Z ]{0,20}?ENJIN[\s\S]{0,60}?(\d{3,4})/)
-    if (engineMatch) result.spec = engineMatch[1]
-
     return result
+}
+
+// Upscales and grayscales the photo before OCR — Tesseract reads high-contrast
+// images far more reliably than the original pink textured certificate.
+async function preprocessImage(file: File): Promise<Blob | File> {
+    try {
+        const bitmap = await createImageBitmap(file)
+        const scale = 2
+        const w = Math.round(bitmap.width * scale)
+        const h = Math.round(bitmap.height * scale)
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+            bitmap.close()
+            return file
+        }
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, w, h)
+        ctx.drawImage(bitmap, 0, 0, w, h)
+        bitmap.close()
+        const imageData = ctx.getImageData(0, 0, w, h)
+        const d = imageData.data
+        for (let i = 0; i < d.length; i += 4) {
+            const gray = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
+            d[i] = gray
+            d[i + 1] = gray
+            d[i + 2] = gray
+        }
+        ctx.putImageData(imageData, 0, 0)
+        return await new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob(b => (b ? resolve(b) : reject(new Error('Canvas export failed'))), 'image/png')
+        })
+    } catch {
+        return file
+    }
 }
 
 function matchOption(options: string[], target: string): string | null {
@@ -108,6 +165,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     const [insurancePanel, setInsurancePanel] = useState('')
     const [intakeCost, setIntakeCost] = useState('')
     const [ocrBusy, setOcrBusy] = useState(false)
+    const [ocrStatus, setOcrStatus] = useState('')
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     if (!isOpen) return null
@@ -175,14 +233,18 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         e.target.value = ''
         if (!file) return
         setOcrBusy(true)
+        setOcrStatus('loading')
         try {
             const { createWorker } = await import('tesseract.js')
             const worker = await createWorker('eng')
-            const { data } = await worker.recognize(file)
+            setOcrStatus('reading')
+            const image = await preprocessImage(file)
+            const { data } = await worker.recognize(image)
             await worker.terminate()
+            setOcrStatus('parsing')
             const parsed = parseGrantText(data.text)
             if (!parsed.plate && !parsed.chassis && !parsed.make && !parsed.year) {
-                showToast('Could not read vehicle details from this photo. Please fill in manually.', 'error')
+                showToast('Could not read vehicle details from this photo. Make sure the certificate is upright, in focus, and well lit.', 'error')
                 return
             }
             applyParsed(parsed)
@@ -190,6 +252,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
             showToast('Photo scan failed. Please fill in the details manually.', 'error')
         } finally {
             setOcrBusy(false)
+            setOcrStatus('')
         }
     }
 
@@ -248,8 +311,13 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                         >
                             {ocrBusy ? '⏳ Scanning grant photo…' : '📷 Scan Grant / VOC Photo'}
                         </button>
+                        {ocrBusy && (
+                            <p className={`text-[10px] font-bold mt-2 ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>
+                                {ocrStatus === 'loading' ? '⏳ Preparing OCR engine (first scan downloads ~15 MB, please wait)…' : ocrStatus === 'reading' ? '📖 Reading text from photo…' : '✨ Filling in fields…'}
+                            </p>
+                        )}
                         <p className={`text-[10px] font-medium mt-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                            Upload a photo of the vehicle grant (SIJIL PEMILIKAN KENDERAAN) to auto-fill plate, chassis, make, model, spec &amp; year — review the fields before saving.
+                            Upload a photo of the vehicle grant (SIJIL PEMILIKAN KENDERAAN) to auto-fill plate, chassis, make, model, spec &amp; year — keep the certificate upright. Review the fields before saving.
                         </p>
                     </div>
 
