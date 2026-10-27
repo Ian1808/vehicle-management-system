@@ -3,12 +3,18 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { addWatermarkToFile } from '@/utils/watermark'
+import Link from 'next/link'
 
 type Vehicle = {
     id: string
     plate_number: string
+    chassis_number: string
     make_model_year: string
+    insurance_panel: string
     status: string
+    intake_cost: number
+    market_value: number
+    repair_cost: number
 }
 
 type MediaItem = {
@@ -105,8 +111,8 @@ export default function TechnicianPortal() {
                 .eq('id', user.id)
                 .single()
 
-            if (userError || !userData || userData.role !== 'technician') {
-                showToast('Access Denied: Restricted to technicians only.', 'error')
+            if (userError || !userData || (userData.role !== 'technician' && userData.role !== 'admin')) {
+                showToast('Access Denied: Restricted to workshop technicians.', 'error')
                 setTimeout(() => { window.location.href = '/' }, 1500)
                 return
             }
@@ -123,7 +129,7 @@ export default function TechnicianPortal() {
         setLoading(true)
         const { data, error } = await supabase
             .from('vehicles')
-            .select('id, plate_number, make_model_year, status')
+            .select('*')
             .in('status', ['pending_before_photos', 'in_repair', 'pending_after_photos'])
             .eq('is_deleted', false)
             .order('created_at', { ascending: false })
@@ -458,7 +464,7 @@ export default function TechnicianPortal() {
     const isDark = theme === 'dark'
 
     return (
-        <div className={`min-h-screen pb-12 relative selection:bg-emerald-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
+        <div className={`min-h-screen pb-16 relative selection:bg-emerald-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
             {toast && (
                 <div className="fixed top-6 right-6 z-50 animate-bounce">
                     <div className={`px-5 py-3 rounded-2xl shadow-2xl text-xs font-bold flex items-center gap-3 border ${toast.type === 'success'
@@ -699,36 +705,41 @@ export default function TechnicianPortal() {
             )}
 
             {/* Header */}
-            <header className={`border-b sticky top-0 z-20 shadow-md ${isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
-                <div className="max-w-3xl mx-auto px-4 py-4 flex justify-between items-center">
-                    <h1 className="text-base font-bold tracking-wide text-emerald-400 flex items-center gap-2">
-                        🛠️ Technician Portal <span className={`text-[10px] px-2 py-0.5 rounded-md border ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>Mobile View</span>
-                    </h1>
-                    <div className="flex items-center gap-2">
+            <header className={`border-b sticky top-0 z-20 shadow-lg backdrop-blur-md ${isDark ? 'bg-slate-950/90 border-slate-800 text-white' : 'bg-white/90 border-slate-200 text-slate-900'}`}>
+                <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-2xl bg-emerald-600/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-black text-base">
+                            🛠️
+                        </div>
+                        <div>
+                            <h1 className="text-base font-extrabold tracking-tight">Workshop Technician Portal</h1>
+                            <p className={`text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Floor Inspection & Evidence Management</p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-2.5">
                         <button
                             onClick={() => setTheme(isDark ? 'light' : 'dark')}
                             className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-amber-600 border-slate-200'}`}
                             title="Toggle Theme"
                         >
-                            {isDark ? '☀️' : '🌙'}
+                            {isDark ? '☀️ Light' : '🌙 Dark'}
                         </button>
-                        {selectedVehicle && (
-                            <button
-                                onClick={() => setSelectedVehicle(null)}
-                                className={`text-xs px-3 py-1.5 rounded-xl font-semibold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}
-                            >
-                                &larr; Switch
-                            </button>
-                        )}
+                        <Link
+                            href="/"
+                            className={`font-bold px-3.5 py-2 rounded-xl text-xs border transition-all ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}
+                        >
+                            Front Desk View
+                        </Link>
                         <button
                             onClick={() => setShowSettingsModal(true)}
-                            className={`text-xs px-3 py-1.5 rounded-xl font-semibold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-slate-700' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}
+                            className={`font-semibold px-3.5 py-2 rounded-xl text-xs border transition-all cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-slate-700' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}
                         >
                             ⚙️ Settings
                         </button>
                         <button
                             onClick={requestLogout}
-                            className="text-xs bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 rounded-xl font-semibold transition-colors shadow cursor-pointer"
+                            className="bg-rose-600 hover:bg-rose-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs shadow transition-all cursor-pointer"
                         >
                             Sign Out
                         </button>
@@ -736,33 +747,55 @@ export default function TechnicianPortal() {
                 </div>
             </header>
 
-            <main className="max-w-3xl mx-auto px-4 pt-6">
+            <main className="max-w-7xl mx-auto px-6 py-8">
                 {!selectedVehicle ? (
                     <div>
-                        <h2 className={`text-xl font-bold mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>Assigned Vehicles</h2>
-                        <p className="text-xs text-slate-400 mb-6 font-medium">Select a vehicle to inspect and capture mandatory photo evidence.</p>
+                        <div className="flex justify-between items-center mb-6">
+                            <div>
+                                <h2 className={`text-xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Active Workshop Queue</h2>
+                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Select an assigned vehicle to record inspection photos and update repair progress.</p>
+                            </div>
+                            <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full border ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-slate-200 text-slate-700 border-slate-300'}`}>
+                                Queue Count: {vehicles.length} Vehicles
+                            </span>
+                        </div>
 
                         {loading ? (
-                            <div className="text-center py-16 text-slate-500 font-medium">Loading assigned vehicles...</div>
+                            <div className="p-16 text-center text-slate-500 font-medium">Loading workshop queue...</div>
                         ) : vehicles.length === 0 ? (
-                            <div className={`border rounded-2xl p-8 text-center ${isDark ? 'bg-slate-900/80 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-600'}`}>
-                                No vehicles currently awaiting photo inspection.
+                            <div className={`p-16 text-center rounded-3xl border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-600'}`}>
+                                No vehicles currently assigned for workshop inspection.
                             </div>
                         ) : (
-                            <div className="space-y-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                                 {vehicles.map((v) => (
                                     <div
                                         key={v.id}
                                         onClick={() => selectVehicle(v)}
-                                        className={`border hover:border-emerald-500/80 p-4.5 rounded-2xl cursor-pointer transition-all flex justify-between items-center shadow-xs ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}
+                                        className={`border rounded-3xl p-6 cursor-pointer transition-all hover:shadow-xl flex flex-col justify-between ${isDark
+                                                ? 'bg-slate-950 border-slate-800 hover:border-emerald-500/80'
+                                                : 'bg-white border-slate-200 hover:border-emerald-500/80 hover:shadow-md'
+                                            }`}
                                     >
                                         <div>
-                                            <h3 className={`text-base font-bold tracking-wide ${isDark ? 'text-white' : 'text-slate-900'}`}>{v.plate_number}</h3>
-                                            <p className="text-xs text-slate-400 mt-0.5">{v.make_model_year}</p>
+                                            <div className="flex justify-between items-start mb-3">
+                                                <h3 className={`text-lg font-black tracking-tight ${isDark ? 'text-white' : 'text-blue-950'}`}>{v.plate_number}</h3>
+                                                <span className="px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-950 text-emerald-300 border border-emerald-800/60">
+                                                    {v.status.replace(/_/g, ' ')}
+                                                </span>
+                                            </div>
+                                            <p className={`text-xs font-semibold mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{v.make_model_year}</p>
+                                            <p className={`text-[11px] font-mono p-2.5 rounded-xl border mb-6 truncate ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                                                VIN: <span className={`font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>{v.chassis_number || 'N/A'}</span>
+                                            </p>
                                         </div>
-                                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 capitalize">
-                                            {v.status.replace(/_/g, ' ')}
-                                        </span>
+
+                                        <button
+                                            type="button"
+                                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer flex items-center justify-center gap-1.5"
+                                        >
+                                            Inspect & Upload Photos &rarr;
+                                        </button>
                                     </div>
                                 ))}
                             </div>
@@ -770,80 +803,97 @@ export default function TechnicianPortal() {
                     </div>
                 ) : (
                     <div>
-                        <div className={`border rounded-2xl p-6 mb-6 shadow-sm ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-                            <div className="flex justify-between items-start mb-2">
-                                <h2 className={`text-2xl font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedVehicle.plate_number}</h2>
-                                <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 capitalize">
-                                    {selectedVehicle.status.replace(/_/g, ' ')}
-                                </span>
-                            </div>
-                            <p className="text-xs text-slate-400 mb-5 font-medium">{selectedVehicle.make_model_year}</p>
+                        <button
+                            onClick={() => setSelectedVehicle(null)}
+                            className={`mb-6 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer px-3.5 py-2 rounded-xl border w-fit shadow-xs ${isDark ? 'bg-slate-950 text-emerald-400 hover:text-emerald-300 border-slate-800' : 'bg-white text-emerald-600 hover:text-emerald-700 border-slate-200'}`}
+                        >
+                            &larr; Back to Workshop Queue
+                        </button>
 
-                            <div className={`flex gap-2 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
-                                {selectedVehicle.status === 'pending_before_photos' && (
-                                    <button
-                                        onClick={() => requestStatusTransition('in_repair')}
-                                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl text-xs shadow-md transition-all cursor-pointer"
-                                    >
-                                        Complete "Before" Photos &rarr; Start Repair
-                                    </button>
-                                )}
-                                {selectedVehicle.status === 'in_repair' && (
-                                    <button
-                                        onClick={() => requestStatusTransition('pending_after_photos')}
-                                        className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-xl text-xs shadow-md transition-all cursor-pointer"
-                                    >
-                                        Finish Repair &rarr; Request "After" Photos
-                                    </button>
-                                )}
-                                {selectedVehicle.status === 'pending_after_photos' && (
-                                    <button
-                                        onClick={() => requestStatusTransition('road_ready')}
-                                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl text-xs shadow-md transition-all cursor-pointer"
-                                    >
-                                        Complete "After" Photos &rarr; Mark Road Ready
-                                    </button>
-                                )}
+                        {/* Vehicle Header Overview & Status Transition */}
+                        <div className={`rounded-3xl border p-8 mb-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                <div>
+                                    <div className="flex items-center gap-3">
+                                        <h2 className="text-3xl font-black tracking-tight">{selectedVehicle.plate_number}</h2>
+                                        <span className="px-3.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-950 text-emerald-300 border border-emerald-800/60">
+                                            {selectedVehicle.status.replace(/_/g, ' ')}
+                                        </span>
+                                    </div>
+                                    <p className="text-xs font-semibold text-slate-400 mt-1">{selectedVehicle.make_model_year} • VIN: {selectedVehicle.chassis_number}</p>
+                                </div>
+
+                                <div className="w-full md:w-auto">
+                                    {selectedVehicle.status === 'pending_before_photos' && (
+                                        <button
+                                            onClick={() => requestStatusTransition('in_repair')}
+                                            className="w-full md:w-auto bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-2xl text-xs shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                                        >
+                                            ✓ Complete "Before" Photos &rarr; Start Repair
+                                        </button>
+                                    )}
+                                    {selectedVehicle.status === 'in_repair' && (
+                                        <button
+                                            onClick={() => requestStatusTransition('pending_after_photos')}
+                                            className="w-full md:w-auto bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-2xl text-xs shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                                        >
+                                            🔧 Finish Repair &rarr; Request "After" Photos
+                                        </button>
+                                    )}
+                                    {selectedVehicle.status === 'pending_after_photos' && (
+                                        <button
+                                            onClick={() => requestStatusTransition('road_ready')}
+                                            className="w-full md:w-auto bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-2xl text-xs shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                                        >
+                                            🏁 Complete "After" Photos &rarr; Mark Road Ready
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
-                        <div className="space-y-6">
+                        {/* Photo Evidence Management Grid */}
+                        <div className="space-y-8">
                             {/* 1. MANDATORY BEFORE PHOTOS */}
-                            <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>1. Mandatory "Before" Photos</h3>
-                                    <span className={`text-xs px-3 py-1 rounded-full font-bold border ${isDark ? 'bg-slate-800 text-emerald-400 border-slate-700' : 'bg-slate-100 text-emerald-600 border-slate-200'}`}>
+                            <div className={`rounded-3xl border p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                                <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-800/50">
+                                    <div>
+                                        <h3 className="text-sm font-extrabold uppercase tracking-wider">1. Mandatory "Before" Photos (8 Angles)</h3>
+                                        <p className="text-xs text-slate-400 font-medium mt-0.5">All 8 angles are required before transitioning the vehicle to "In Repair".</p>
+                                    </div>
+                                    <span className="text-xs font-bold bg-emerald-950 text-emerald-300 px-3.5 py-1.5 rounded-full border border-emerald-800/60">
                                         {mediaItems.filter(m => m.media_type === 'photo_before').length} / 8 Captured
                                     </span>
                                 </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                                     {PHOTO_CATEGORIES.map((cat) => {
                                         const uploaded = mediaItems.find(m => m.category === cat.key && m.media_type === 'photo_before')
                                         const isUploading = uploadingCategory === cat.key
-                                        const inputId = `tech-input-before-${cat.key}`
+                                        const inputId = `desktop-input-before-${cat.key}`
 
                                         return (
-                                            <div key={cat.key} className={`border rounded-xl p-3.5 flex items-center justify-between ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                            <div key={cat.key} className={`border rounded-2xl p-4 flex flex-col justify-between shadow-xs ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                                 <div>
-                                                    <p className={`text-xs font-bold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{cat.label}</p>
-                                                    <p className={`text-[10px] font-semibold mt-0.5 ${uploaded ? 'text-emerald-400' : 'text-slate-500'}`}>
-                                                        {uploaded ? '✓ Captured' : 'Required'}
+                                                    <p className="text-xs font-extrabold uppercase tracking-wider mb-1">{cat.label}</p>
+                                                    <p className={`text-xs font-semibold mb-4 ${uploaded ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                                        {uploaded ? '✓ Captured & Secure' : 'Required'}
                                                     </p>
                                                 </div>
                                                 <div>
                                                     {uploaded ? (
-                                                        <div className="flex gap-1">
+                                                        <div className="flex gap-2 w-full">
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setPreviewMedia({ url: uploaded.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })}
-                                                                className={`text-[11px] px-2.5 py-1.5 rounded-lg font-bold border cursor-pointer ${isDark ? 'bg-slate-800 text-emerald-400 border-slate-700 hover:bg-slate-700' : 'bg-white text-emerald-600 border-slate-300 hover:bg-slate-100'}`}
+                                                                className="w-1/2 text-center bg-slate-800 hover:bg-slate-700 text-emerald-300 py-2 rounded-xl text-xs font-bold transition-colors border border-slate-700 cursor-pointer"
                                                             >
                                                                 View
                                                             </button>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => requestDeletePhoto(cat.key, 'photo_before')}
-                                                                className="text-[11px] bg-rose-950 text-rose-400 px-2.5 py-1.5 rounded-lg font-bold border border-rose-900 hover:bg-rose-900 transition-colors cursor-pointer"
+                                                                className="w-1/2 text-center bg-rose-950 hover:bg-rose-900 text-rose-300 py-2 rounded-xl text-xs font-bold transition-colors border border-rose-900 cursor-pointer"
                                                             >
                                                                 Remove
                                                             </button>
@@ -852,16 +902,15 @@ export default function TechnicianPortal() {
                                                         <div>
                                                             <label
                                                                 htmlFor={inputId}
-                                                                className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-1.5 rounded-lg font-bold cursor-pointer shadow inline-block"
+                                                                className="w-full block text-center bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow-md transition-all"
                                                             >
-                                                                {isUploading ? '...' : 'Snap Camera'}
+                                                                {isUploading ? 'Uploading...' : 'Upload / Snap'}
                                                             </label>
                                                             <input
                                                                 id={inputId}
                                                                 key={inputId}
                                                                 type="file"
                                                                 accept="image/*"
-                                                                capture="environment"
                                                                 className="hidden"
                                                                 onChange={(e) => handlePhotoSelect(e, cat.key, true)}
                                                             />
@@ -876,41 +925,45 @@ export default function TechnicianPortal() {
 
                             {/* 2. MANDATORY AFTER PHOTOS */}
                             {(selectedVehicle.status === 'in_repair' || selectedVehicle.status === 'pending_after_photos' || selectedVehicle.status === 'road_ready') && (
-                                <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-                                    <div className="flex justify-between items-center mb-4">
-                                        <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>2. Mandatory "After" Photos</h3>
-                                        <span className={`text-xs px-3 py-1 rounded-full font-bold border ${isDark ? 'bg-slate-800 text-blue-400 border-slate-700' : 'bg-slate-100 text-blue-600 border-slate-200'}`}>
+                                <div className={`rounded-3xl border p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                                    <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-800/50">
+                                        <div>
+                                            <h3 className="text-sm font-extrabold uppercase tracking-wider">2. Mandatory "After" Photos (8 Angles)</h3>
+                                            <p className="text-xs text-slate-400 font-medium mt-0.5">All 8 angles are required before marking the vehicle as "Road Ready".</p>
+                                        </div>
+                                        <span className="text-xs font-bold bg-blue-950 text-blue-300 px-3.5 py-1.5 rounded-full border border-blue-800/60">
                                             {mediaItems.filter(m => m.media_type === 'photo_after').length} / 8 Captured
                                         </span>
                                     </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                                         {PHOTO_CATEGORIES.map((cat) => {
                                             const uploaded = mediaItems.find(m => m.category === cat.key && m.media_type === 'photo_after')
                                             const isUploading = uploadingCategory === `after-${cat.key}`
-                                            const inputId = `tech-input-after-${cat.key}`
+                                            const inputId = `desktop-input-after-${cat.key}`
 
                                             return (
-                                                <div key={cat.key} className={`border rounded-xl p-3.5 flex items-center justify-between ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                                <div key={cat.key} className={`border rounded-2xl p-4 flex flex-col justify-between shadow-xs ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                                     <div>
-                                                        <p className={`text-xs font-bold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{cat.label}</p>
-                                                        <p className={`text-[10px] font-semibold mt-0.5 ${uploaded ? 'text-blue-400' : 'text-slate-500'}`}>
-                                                            {uploaded ? '✓ Captured' : 'Required'}
+                                                        <p className="text-xs font-extrabold uppercase tracking-wider mb-1">{cat.label}</p>
+                                                        <p className={`text-xs font-semibold mb-4 ${uploaded ? 'text-blue-400' : 'text-slate-500'}`}>
+                                                            {uploaded ? '✓ Captured & Secure' : 'Required'}
                                                         </p>
                                                     </div>
                                                     <div>
                                                         {uploaded ? (
-                                                            <div className="flex gap-1">
+                                                            <div className="flex gap-2 w-full">
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => setPreviewMedia({ url: uploaded.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })}
-                                                                    className={`text-[11px] px-2.5 py-1.5 rounded-lg font-bold border cursor-pointer ${isDark ? 'bg-slate-800 text-blue-400 border-slate-700 hover:bg-slate-700' : 'bg-white text-blue-600 border-slate-300 hover:bg-slate-100'}`}
+                                                                    className="w-1/2 text-center bg-slate-800 hover:bg-slate-700 text-blue-300 py-2 rounded-xl text-xs font-bold transition-colors border border-slate-700 cursor-pointer"
                                                                 >
                                                                     View
                                                                 </button>
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => requestDeletePhoto(cat.key, 'photo_after')}
-                                                                    className="text-[11px] bg-rose-950 text-rose-400 px-2.5 py-1.5 rounded-lg font-bold border border-rose-900 hover:bg-rose-900 transition-colors cursor-pointer"
+                                                                    className="w-1/2 text-center bg-rose-950 hover:bg-rose-900 text-rose-300 py-2 rounded-xl text-xs font-bold transition-colors border border-rose-900 cursor-pointer"
                                                                 >
                                                                     Remove
                                                                 </button>
@@ -919,16 +972,15 @@ export default function TechnicianPortal() {
                                                             <div>
                                                                 <label
                                                                     htmlFor={inputId}
-                                                                    className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-1.5 rounded-lg font-bold cursor-pointer shadow inline-block"
+                                                                    className="w-full block text-center bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow-md transition-all"
                                                                 >
-                                                                    {isUploading ? '...' : 'Snap Camera'}
+                                                                    {isUploading ? 'Uploading...' : 'Upload / Snap'}
                                                                 </label>
                                                                 <input
                                                                     id={inputId}
                                                                     key={inputId}
                                                                     type="file"
                                                                     accept="image/*"
-                                                                    capture="environment"
                                                                     className="hidden"
                                                                     onChange={(e) => handlePhotoSelect(e, cat.key, false)}
                                                                 />
@@ -942,25 +994,24 @@ export default function TechnicianPortal() {
                                 </div>
                             )}
 
-                            {/* 3. ADDITIONAL PHOTOS & EVIDENCE */}
-                            <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-                                <div className="flex justify-between items-center mb-4">
+                            {/* 3. ADDITIONAL EVIDENCE PHOTOS */}
+                            <div className={`rounded-3xl border p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                                <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-800/50">
                                     <div>
-                                        <h3 className="font-bold text-sm text-purple-400 uppercase tracking-wider">3. Additional Evidence Photos</h3>
-                                        <p className="text-[11px] text-slate-400">Upload close-up damage details, part codes, or extra inspection angles.</p>
+                                        <h3 className="text-sm font-extrabold text-purple-400 uppercase tracking-wider">3. Additional Evidence Photos ({additionalPhotos.length})</h3>
+                                        <p className="text-xs text-slate-400 font-medium mt-0.5">Upload close-up damage details, part codes, or extra inspection angles.</p>
                                     </div>
                                     <div>
                                         <label
-                                            htmlFor="tech-input-additional"
-                                            className="text-xs bg-purple-600 hover:bg-purple-500 text-white px-3.5 py-1.5 rounded-xl font-bold cursor-pointer shadow inline-block transition-colors"
+                                            htmlFor="desktop-input-additional"
+                                            className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow-md transition-all inline-block"
                                         >
-                                            + Add Photo
+                                            + Add Extra Photo
                                         </label>
                                         <input
-                                            id="tech-input-additional"
+                                            id="desktop-input-additional"
                                             type="file"
                                             accept="image/*"
-                                            capture="environment"
                                             className="hidden"
                                             onChange={handleAdditionalPhotoSelect}
                                         />
@@ -968,31 +1019,31 @@ export default function TechnicianPortal() {
                                 </div>
 
                                 {additionalPhotos.length === 0 ? (
-                                    <div className={`border border-dashed rounded-xl p-4 text-center text-xs text-slate-500 font-medium ${isDark ? 'bg-slate-950/50 border-slate-800' : 'bg-slate-50 border-slate-300'}`}>
-                                        No additional evidence photos uploaded yet. Tap "+ Add Photo" to snap optional extra angles.
+                                    <div className={`border border-dashed rounded-2xl p-8 text-center text-xs text-slate-500 font-medium ${isDark ? 'bg-slate-900/50 border-slate-800' : 'bg-slate-50 border-slate-300'}`}>
+                                        No additional evidence photos uploaded yet. Click "+ Add Extra Photo" to include optional close-ups.
                                     </div>
                                 ) : (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                                         {additionalPhotos.map((item) => {
                                             const displayTitle = item.category.replace(/^extra_/, '').replace(/_[0-9]+$/, '').replace(/_/g, ' ')
                                             return (
-                                                <div key={item.id} className={`border rounded-xl p-3.5 flex items-center justify-between ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                                <div key={item.id} className={`border rounded-2xl p-4 flex flex-col justify-between shadow-xs ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                                     <div>
-                                                        <p className="text-xs font-bold text-purple-300 capitalize">{displayTitle}</p>
-                                                        <p className="text-[10px] text-slate-400 font-semibold mt-0.5">✓ Extra Evidence</p>
+                                                        <p className="text-xs font-extrabold text-purple-300 uppercase tracking-wider mb-1 capitalize">{displayTitle}</p>
+                                                        <p className="text-[11px] font-semibold text-emerald-400 mb-4">✓ Extra Evidence Photo</p>
                                                     </div>
-                                                    <div className="flex gap-1">
+                                                    <div className="flex gap-2">
                                                         <button
                                                             type="button"
                                                             onClick={() => setPreviewMedia({ url: item.file_url, title: `${selectedVehicle.plate_number} - ${displayTitle}` })}
-                                                            className={`text-[11px] px-2.5 py-1.5 rounded-lg font-bold border cursor-pointer ${isDark ? 'bg-slate-800 text-purple-300 border-slate-700 hover:bg-slate-700' : 'bg-white text-purple-700 border-slate-300 hover:bg-slate-100'}`}
+                                                            className="w-1/2 text-center bg-slate-800 hover:bg-slate-700 text-purple-300 py-2 rounded-xl text-xs font-bold transition-colors border border-slate-700 cursor-pointer"
                                                         >
                                                             View
                                                         </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => requestDeletePhoto(item.category, 'photo_additional')}
-                                                            className="text-[11px] bg-rose-950 text-rose-400 px-2.5 py-1.5 rounded-lg font-bold border border-rose-900 hover:bg-rose-900 transition-colors cursor-pointer"
+                                                            className="w-1/2 text-center bg-rose-950 hover:bg-rose-900 text-rose-300 py-2 rounded-xl text-xs font-bold transition-colors border border-rose-900 cursor-pointer"
                                                         >
                                                             Remove
                                                         </button>
