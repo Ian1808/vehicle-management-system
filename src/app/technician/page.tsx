@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { addWatermarkToFile } from '@/utils/watermark'
-import Link from 'next/link'
 
 type Vehicle = {
     id: string
@@ -113,7 +112,7 @@ export default function TechnicianPortal() {
 
             if (userError || !userData || (userData.role !== 'technician' && userData.role !== 'admin')) {
                 showToast('Access Denied: Restricted to workshop technicians.', 'error')
-                setTimeout(() => { window.location.href = '/' }, 1500)
+                setTimeout(() => { window.location.href = '/login' }, 1500)
                 return
             }
 
@@ -725,12 +724,6 @@ export default function TechnicianPortal() {
                         >
                             {isDark ? '☀️ Light' : '🌙 Dark'}
                         </button>
-                        <Link
-                            href="/"
-                            className={`font-bold px-3.5 py-2 rounded-xl text-xs border transition-all ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}
-                        >
-                            Front Desk View
-                        </Link>
                         <button
                             onClick={() => setShowSettingsModal(true)}
                             className={`font-semibold px-3.5 py-2 rounded-xl text-xs border transition-all cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-slate-700' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}
