@@ -38,7 +38,7 @@ export default function PreviewModal({ preview, onClose, onDownload, isDark }: P
                         <img
                             src={preview.url}
                             alt={preview.title}
-                            className="max-h-[60vh] w-auto object-contain rounded-xl shadow-md"
+                            className="max-h-[60vh] max-w-full w-auto object-contain rounded-xl shadow-md"
                         />
                     )}
                 </div>
