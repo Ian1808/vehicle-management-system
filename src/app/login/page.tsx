@@ -28,8 +28,28 @@ export default function LoginPage() {
         e.preventDefault()
         setLoading(true)
 
+        const identifier = email.trim()
+        let loginEmail = identifier
+
+        // Allow login by username: resolve the username to the account email first.
+        if (!identifier.includes('@')) {
+            const safePattern = identifier.replace(/[\\%_]/g, '\\$&')
+            const { data: userProfile, error: profileErr } = await supabase
+                .from('users')
+                .select('email')
+                .ilike('username', safePattern)
+                .maybeSingle()
+
+            if (profileErr || !userProfile?.email) {
+                showToast('Username not found. Please check your username.', 'error')
+                setLoading(false)
+                return
+            }
+            loginEmail = userProfile.email
+        }
+
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email,
+            email: loginEmail,
             password,
         })
 
@@ -102,11 +122,11 @@ export default function LoginPage() {
 
                 <form onSubmit={handleLogin} className="space-y-4">
                     <div>
-                        <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Staff Email</label>
+                        <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Email or Username</label>
                         <input
-                            type="email"
+                            type="text"
                             required
-                            placeholder="staff@workshop.com"
+                            placeholder="staff@workshop.com or username"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             className={`w-full border rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-medium ${inputClass}`}
