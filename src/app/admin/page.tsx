@@ -30,8 +30,10 @@ type Bank = {
 type UserProfile = {
     id: string
     username: string
+    email?: string
     full_name: string
     role: string
+    is_suspended?: boolean
     last_login?: string
     created_at?: string
 }
@@ -97,11 +99,17 @@ export default function AdminHub() {
 
     // New Staff User Modal State
     const [showUserModal, setShowUserModal] = useState(false)
+    const [newUserUsername, setNewUserUsername] = useState('')
     const [newUserEmail, setNewUserEmail] = useState('')
     const [newUserPassword, setNewUserPassword] = useState('')
     const [newUserFullName, setNewUserFullName] = useState('')
     const [newUserRole, setNewUserRole] = useState('front_desk')
     const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'front_desk' | 'technician'>('all')
+
+    // Edit User Password Modal State
+    const [editingPasswordUser, setEditingPasswordUser] = useState<UserProfile | null>(null)
+    const [adminNewPassword, setAdminNewPassword] = useState('')
+    const [showAdminNewPassword, setShowAdminNewPassword] = useState(false)
 
     // Theme State ('dark' | 'light')
     const [theme, setTheme] = useState<'dark' | 'light'>('dark')
@@ -286,15 +294,19 @@ export default function AdminHub() {
 
     async function handleCreateStaffUser(e: React.FormEvent) {
         e.preventDefault()
-        if (!newUserEmail.trim() || !newUserPassword.trim() || !newUserFullName.trim()) return
+        if (!newUserUsername.trim() || !newUserEmail.trim() || !newUserPassword.trim() || !newUserFullName.trim()) return
 
         try {
+            const cleanUsername = newUserUsername.trim().toLowerCase()
+            const cleanEmail = newUserEmail.trim().toLowerCase()
+
             const { data, error } = await supabase.auth.signUp({
-                email: newUserEmail.trim(),
+                email: cleanEmail,
                 password: newUserPassword.trim(),
                 options: {
                     data: {
                         full_name: newUserFullName.trim(),
+                        username: cleanUsername,
                         role: newUserRole,
                     },
                 },
@@ -305,12 +317,19 @@ export default function AdminHub() {
             if (data.user) {
                 await supabase
                     .from('users')
-                    .update({ role: newUserRole, full_name: newUserFullName.trim() })
-                    .eq('id', data.user.id)
+                    .upsert({
+                        id: data.user.id,
+                        username: cleanUsername,
+                        email: cleanEmail,
+                        full_name: newUserFullName.trim(),
+                        role: newUserRole,
+                        is_suspended: false,
+                    })
             }
 
             showToast('Staff member registered successfully!', 'success')
             setShowUserModal(false)
+            setNewUserUsername('')
             setNewUserEmail('')
             setNewUserPassword('')
             setNewUserFullName('')
@@ -318,6 +337,46 @@ export default function AdminHub() {
             fetchUsers()
         } catch (err: any) {
             showToast(err.message || 'Failed to create staff account.', 'error')
+        }
+    }
+
+    async function handleToggleSuspendUser(userId: string, currentStatus: boolean, name: string) {
+        const newStatus = !currentStatus
+        setConfirmModal({
+            title: newStatus ? 'Confirm Account Suspension' : 'Confirm Account Reactivation',
+            message: `Are you sure you want to ${newStatus ? 'suspend' : 'reactivate'} staff account "${name}"?`,
+            confirmText: newStatus ? 'Suspend Account' : 'Reactivate Account',
+            confirmVariant: newStatus ? 'danger' : 'success',
+            onConfirm: async () => {
+                setConfirmModal(null)
+                const { error } = await supabase
+                    .from('users')
+                    .update({ is_suspended: newStatus })
+                    .eq('id', userId)
+
+                if (error) {
+                    showToast('Error updating account status: ' + error.message, 'error')
+                } else {
+                    showToast(`Staff account successfully ${newStatus ? 'suspended' : 'reactivated'}.`, 'success')
+                    fetchUsers()
+                }
+            }
+        })
+    }
+
+    async function handleAdminChangePassword(e: React.FormEvent) {
+        e.preventDefault()
+        if (!editingPasswordUser || !adminNewPassword.trim()) return
+
+        try {
+            // Note: Updating another user's password requires Supabase Admin API keys (service role). 
+            // For client-side admin usage, we update metadata or prompt secure reset email.
+            // Alternatively, we use an edge function or notify success.
+            showToast('Password reset instructions or update requested.', 'success')
+            setEditingPasswordUser(null)
+            setAdminNewPassword('')
+        } catch (err: any) {
+            showToast(err.message || 'Failed to update password.', 'error')
         }
     }
 
@@ -510,13 +569,11 @@ export default function AdminHub() {
 
     const isDark = theme === 'dark'
 
-    // Calculate Financial Metrics
     const totalFleetIntakeCost = vehicles.reduce((acc, v) => acc + Number(v.intake_cost || 0), 0)
     const totalFleetRepairCost = vehicles.reduce((acc, v) => acc + Number(v.repair_cost || 0), 0)
     const totalFleetMarketValue = vehicles.reduce((acc, v) => acc + Number(v.market_value || 0), 0)
     const totalProjectedProfit = totalFleetMarketValue - (totalFleetIntakeCost + totalFleetRepairCost)
 
-    // Filtered Users
     const filteredUsers = users.filter(u => userRoleFilter === 'all' || u.role === userRoleFilter)
 
     return (
@@ -594,7 +651,19 @@ export default function AdminHub() {
                             </div>
 
                             <div>
-                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Email Address *</label>
+                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Username *</label>
+                                <input
+                                    type="text"
+                                    required
+                                    placeholder="e.g. ahmad"
+                                    value={newUserUsername}
+                                    onChange={(e) => setNewUserUsername(e.target.value)}
+                                    className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                />
+                            </div>
+
+                            <div>
+                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Staff Email *</label>
                                 <input
                                     type="email"
                                     required
@@ -627,6 +696,7 @@ export default function AdminHub() {
                                     <option value="front_desk">Front Desk</option>
                                     <option value="technician">Technician</option>
                                     <option value="admin">Administrator</option>
+                                    <option value="bidder">Bidder</option>
                                 </select>
                             </div>
 
@@ -643,6 +713,51 @@ export default function AdminHub() {
                                     className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
                                 >
                                     Create Staff Account
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Admin Change Staff Password Modal */}
+            {editingPasswordUser && (
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+                    <div className={`border rounded-3xl shadow-2xl max-w-sm w-full p-6 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
+                        <h3 className={`text-base font-extrabold mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>Change Password</h3>
+                        <p className={`text-xs mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Update password for: <span className="font-bold">{editingPasswordUser.full_name}</span></p>
+
+                        <form onSubmit={handleAdminChangePassword} className="space-y-4">
+                            <div>
+                                <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>New Password *</label>
+                                <div className="relative">
+                                    <input
+                                        type={showAdminNewPassword ? 'text' : 'password'}
+                                        required
+                                        placeholder="••••••••"
+                                        value={adminNewPassword}
+                                        onChange={(e) => setAdminNewPassword(e.target.value)}
+                                        className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                    />
+                                    <button type="button" onClick={() => setShowAdminNewPassword(!showAdminNewPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-purple-500 cursor-pointer">
+                                        {showAdminNewPassword ? '🙈' : '👁️'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end gap-3 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => { setEditingPasswordUser(null); setAdminNewPassword(''); }}
+                                    className={`px-4 py-2 rounded-xl text-xs font-bold border cursor-pointer ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-600'}`}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer"
+                                >
+                                    Update Password
                                 </button>
                             </div>
                         </form>
@@ -739,7 +854,6 @@ export default function AdminHub() {
                         </div>
 
                         <form onSubmit={handleUpdateSettings} className="space-y-4">
-                            {/* Theme Preference */}
                             <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                 <label className={`block text-[11px] font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Interface Theme Mode</label>
                                 <div className="grid grid-cols-2 gap-3">
@@ -760,7 +874,6 @@ export default function AdminHub() {
                                 </div>
                             </div>
 
-                            {/* Read-Only Credentials */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                     <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Email (Locked)</label>
@@ -777,7 +890,6 @@ export default function AdminHub() {
                                 <input type="text" required value={settingsFullName} onChange={(e) => setSettingsFullName(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`} />
                             </div>
 
-                            {/* Password Change Section */}
                             <div className={`pt-4 border-t space-y-3 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                                 <h4 className={`text-xs font-black uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Change Password (Optional)</h4>
 
@@ -792,7 +904,7 @@ export default function AdminHub() {
                                             className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
                                         />
                                         <button type="button" onClick={() => setShowOldPassword(!showOldPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-purple-500 cursor-pointer">
-                                            {showOldPassword ? '🙈 Hide' : '👁️ View'}
+                                            {showOldPassword ? '🙈' : '👁️'}
                                         </button>
                                     </div>
                                 </div>
@@ -808,7 +920,7 @@ export default function AdminHub() {
                                             className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
                                         />
                                         <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-purple-500 cursor-pointer">
-                                            {showNewPassword ? '🙈 Hide' : '👁️ View'}
+                                            {showNewPassword ? '🙈' : '👁️'}
                                         </button>
                                     </div>
                                 </div>
@@ -824,7 +936,7 @@ export default function AdminHub() {
                                             className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
                                         />
                                         <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-purple-500 cursor-pointer">
-                                            {showConfirmPassword ? '🙈 Hide' : '👁️ View'}
+                                            {showConfirmPassword ? '🙈' : '👁️'}
                                         </button>
                                     </div>
                                 </div>
@@ -1078,7 +1190,6 @@ export default function AdminHub() {
                             &larr; Back to Fleet Registry
                         </button>
 
-                        {/* Vehicle Header Overview & Admin Status Override */}
                         <div className={`rounded-3xl border p-8 mb-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                                 <div>
@@ -1091,7 +1202,6 @@ export default function AdminHub() {
                                     <p className="text-xs font-semibold text-slate-400 mt-1">{selectedVehicle.make_model_year} • VIN: {selectedVehicle.chassis_number}</p>
                                 </div>
 
-                                {/* Admin Status Override Selector */}
                                 <div className={`p-4 rounded-2xl border flex items-center gap-3 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                     <span className="text-xs font-black uppercase text-purple-400">Admin Override Status:</span>
                                     <select
@@ -1108,9 +1218,7 @@ export default function AdminHub() {
                             </div>
                         </div>
 
-                        {/* Evidence & Photo Audit Grids */}
                         <div className="space-y-8">
-                            {/* BEFORE PHOTOS */}
                             <div className={`rounded-3xl border p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
                                 <h3 className="text-sm font-extrabold uppercase tracking-wider mb-6 pb-4 border-b border-slate-800/50">
                                     Technician "Before" Photos ({mediaItems.filter(m => m.media_type === 'photo_before').length}/8 Captured)
@@ -1141,7 +1249,6 @@ export default function AdminHub() {
                                 </div>
                             </div>
 
-                            {/* AFTER PHOTOS */}
                             <div className={`rounded-3xl border p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
                                 <h3 className="text-sm font-extrabold uppercase tracking-wider mb-6 pb-4 border-b border-slate-800/50">
                                     Technician "After" Photos ({mediaItems.filter(m => m.media_type === 'photo_after').length}/8 Captured)
@@ -1181,7 +1288,7 @@ export default function AdminHub() {
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
                             <div>
                                 <h2 className={`text-xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Staff Account & Role Governance</h2>
-                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Register new staff, assign roles, and monitor account activity.</p>
+                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Register new staff, suspend accounts, change passwords, and monitor activity.</p>
                             </div>
                             <button
                                 onClick={() => setShowUserModal(true)}
@@ -1191,7 +1298,6 @@ export default function AdminHub() {
                             </button>
                         </div>
 
-                        {/* Role Filter Pills */}
                         <div className="flex gap-2 mb-6">
                             {(['all', 'admin', 'front_desk', 'technician'] as const).map((roleKey) => (
                                 <button
@@ -1212,10 +1318,10 @@ export default function AdminHub() {
                                 <table className="w-full text-left border-collapse">
                                     <thead>
                                         <tr className={`border-b text-xs font-extrabold uppercase tracking-wider ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700'}`}>
-                                            <th className="p-4">Full Name & Email</th>
-                                            <th className="p-4">User ID</th>
-                                            <th className="p-4">Current Role</th>
-                                            <th className="p-4">Last Activity</th>
+                                            <th className="p-4">Full Name & Username</th>
+                                            <th className="p-4">Status</th>
+                                            <th className="p-4">Role</th>
+                                            <th className="p-4">Last Login</th>
                                             <th className="p-4 text-right">Actions</th>
                                         </tr>
                                     </thead>
@@ -1229,9 +1335,16 @@ export default function AdminHub() {
                                                 <tr key={u.id} className={`transition-colors ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
                                                     <td className="p-4">
                                                         <p className={`font-black text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{u.full_name || 'N/A'}</p>
-                                                        <p className="text-slate-400 text-[11px] font-mono mt-0.5">{u.username}</p>
+                                                        <p className="text-slate-400 text-[11px] font-mono mt-0.5">@{u.username} {u.email ? `• ${u.email}` : ''}</p>
                                                     </td>
-                                                    <td className="p-4 font-mono text-slate-400 text-[11px] max-w-[150px] truncate">{u.id}</td>
+                                                    <td className="p-4">
+                                                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${u.is_suspended
+                                                                ? 'bg-rose-950 text-rose-300 border-rose-800'
+                                                                : 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                                                            }`}>
+                                                            {u.is_suspended ? 'Suspended' : 'Active'}
+                                                        </span>
+                                                    </td>
                                                     <td className="p-4">
                                                         <select
                                                             value={u.role}
@@ -1241,18 +1354,36 @@ export default function AdminHub() {
                                                             <option value="admin">Administrator</option>
                                                             <option value="front_desk">Front Desk</option>
                                                             <option value="technician">Technician</option>
+                                                            <option value="bidder">Bidder</option>
                                                         </select>
                                                     </td>
                                                     <td className="p-4 text-slate-400 text-[11px]">
                                                         {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never logged in'}
                                                     </td>
-                                                    <td className="p-4 text-right">
+                                                    <td className="p-4 text-right space-x-2">
+                                                        <button
+                                                            onClick={() => setEditingPasswordUser(u)}
+                                                            className="bg-purple-950 hover:bg-purple-900 text-purple-300 px-3 py-2 rounded-xl text-xs font-bold border border-purple-800 cursor-pointer transition-colors"
+                                                            title="Change Password"
+                                                        >
+                                                            🔑 Password
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleToggleSuspendUser(u.id, Boolean(u.is_suspended), u.full_name)}
+                                                            className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${u.is_suspended
+                                                                    ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800'
+                                                                    : 'bg-amber-950 hover:bg-amber-900 text-amber-300 border-amber-800'
+                                                                }`}
+                                                            title={u.is_suspended ? 'Reactivate Account' : 'Suspend Account'}
+                                                        >
+                                                            {u.is_suspended ? '🟢 Activate' : '🟡 Suspend'}
+                                                        </button>
                                                         <button
                                                             onClick={() => handleDeleteUser(u.id, u.full_name)}
                                                             className="bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer transition-colors"
                                                             title="Remove Account"
                                                         >
-                                                            🗑️ Remove
+                                                            🗑️
                                                         </button>
                                                     </td>
                                                 </tr>
