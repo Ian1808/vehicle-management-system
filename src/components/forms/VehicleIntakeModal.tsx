@@ -72,7 +72,6 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                 <div className="flex justify-between items-center mb-6">
                     <div>
                         <h3 className={`text-xl font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>New Vehicle Intake</h3>
-                        <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Official Malaysia JPJ Vehicle Catalog</p>
                     </div>
                     <button onClick={onClose} className="rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg bg-slate-800 text-slate-400 hover:text-white cursor-pointer">&times;</button>
                 </div>
