@@ -14,8 +14,16 @@ type Vehicle = {
     intake_cost: number
     market_value: number
     repair_cost: number
-    is_deleted: boolean
+    is_deleted?: boolean
     created_at: string
+}
+
+type UserProfile = {
+    id: string
+    username: string
+    full_name: string
+    role: string
+    last_sign_in_at?: string
 }
 
 type MediaItem = {
@@ -24,16 +32,6 @@ type MediaItem = {
     file_url: string
     media_type: string
     vehicle_id: string
-}
-
-type StaffUser = {
-    id: string
-    username: string
-    email: string
-    full_name: string
-    role: string
-    last_login: string | null
-    created_at: string
 }
 
 type Toast = {
@@ -65,13 +63,14 @@ const PHOTO_CATEGORIES = [
     { key: 'chassis_number', label: 'Chassis Number (VIN)' },
 ]
 
-export default function AdminDashboard() {
-    const [activeTab, setActiveTab] = useState<'vehicles' | 'staff' | 'trash'>('vehicles')
+export default function AdminHub() {
+    const [activeTab, setActiveTab] = useState<'vehicles' | 'users' | 'trash'>('vehicles')
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [deletedVehicles, setDeletedVehicles] = useState<Vehicle[]>([])
-    const [staffUsers, setStaffUsers] = useState<StaffUser[]>([])
+    const [users, setUsers] = useState<UserProfile[]>([])
     const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
+
     const [loading, setLoading] = useState(true)
     const [toast, setToast] = useState<Toast | null>(null)
     const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null)
@@ -120,7 +119,7 @@ export default function AdminDashboard() {
                 .single()
 
             if (userError || !userData || userData.role !== 'admin') {
-                showToast('Access Denied: Restricted to Workshop Administrators.', 'error')
+                showToast('Access Denied: Restricted to system administrators.', 'error')
                 setTimeout(() => { window.location.href = '/' }, 1500)
                 return
             }
@@ -128,21 +127,22 @@ export default function AdminDashboard() {
             setSettingsFullName(userData.full_name || '')
             setSettingsUsername(userData.username || '')
 
-            fetchVehicles()
-            fetchDeletedVehicles()
-            fetchStaffUsers()
+            fetchAllData()
         }
         checkAdminAccess()
     }, [])
 
-    useEffect(() => {
-        if (selectedVehicle) {
-            fetchVehicleMedia(selectedVehicle.id)
-        }
-    }, [selectedVehicle?.id])
+    async function fetchAllData() {
+        setLoading(true)
+        await Promise.all([
+            fetchVehicles(),
+            fetchDeletedVehicles(),
+            fetchUsers()
+        ])
+        setLoading(false)
+    }
 
     async function fetchVehicles() {
-        setLoading(true)
         const { data, error } = await supabase
             .from('vehicles')
             .select('*')
@@ -151,7 +151,6 @@ export default function AdminDashboard() {
 
         if (error) showToast(error.message, 'error')
         else setVehicles(data || [])
-        setLoading(false)
     }
 
     async function fetchDeletedVehicles() {
@@ -159,21 +158,23 @@ export default function AdminDashboard() {
             .from('vehicles')
             .select('*')
             .eq('is_deleted', true)
-            .order('updated_at', { ascending: false })
+            .order('created_at', { ascending: false })
 
-        if (!error) setDeletedVehicles(data || [])
+        if (error) showToast(error.message, 'error')
+        else setDeletedVehicles(data || [])
     }
 
-    async function fetchStaffUsers() {
+    async function fetchUsers() {
         const { data, error } = await supabase
             .from('users')
             .select('*')
-            .order('created_at', { ascending: false })
+            .order('full_name', { ascending: true })
 
-        if (!error) setStaffUsers(data || [])
+        if (error) showToast(error.message, 'error')
+        else setUsers(data || [])
     }
 
-    async function fetchVehicleMedia(vehicleId: string) {
+    async function fetchMedia(vehicleId: string) {
         const { data, error } = await supabase
             .from('vehicle_media')
             .select('*')
@@ -181,6 +182,11 @@ export default function AdminDashboard() {
 
         if (error) showToast(error.message, 'error')
         else setMediaItems(data || [])
+    }
+
+    const selectVehicle = (v: Vehicle) => {
+        setSelectedVehicle(v)
+        fetchMedia(v.id)
     }
 
     async function handleUpdateSettings(e: React.FormEvent) {
@@ -225,16 +231,94 @@ export default function AdminDashboard() {
                 setConfirmNewPassword('')
             }
 
-            showToast('Settings & security updated successfully!', 'success')
+            showToast('Admin settings & security updated successfully!', 'success')
             setShowSettingsModal(false)
         } catch (err: any) {
             showToast(err.message || 'Failed to update settings.', 'error')
         }
     }
 
+    async function handleUpdateUserRole(userId: string, newRole: string) {
+        setConfirmModal({
+            title: 'Confirm Role Change',
+            message: `Are you sure you want to change this user's role to "${newRole.toUpperCase()}"?`,
+            confirmText: 'Update Role',
+            confirmVariant: 'success',
+            onConfirm: async () => {
+                setConfirmModal(null)
+                const { error } = await supabase
+                    .from('users')
+                    .update({ role: newRole })
+                    .eq('id', userId)
+
+                if (error) {
+                    showToast('Error updating role: ' + error.message, 'error')
+                } else {
+                    showToast('User role updated successfully!', 'success')
+                    fetchUsers()
+                }
+            }
+        })
+    }
+
+    async function handleStatusOverride(vehicleId: string, newStatus: string) {
+        const { error } = await supabase
+            .from('vehicles')
+            .update({ status: newStatus, updated_at: new Date().toISOString() })
+            .eq('id', vehicleId)
+
+        if (error) {
+            showToast('Error overriding status: ' + error.message, 'error')
+        } else {
+            showToast(`Status overridden to: ${newStatus.replace(/_/g, ' ').toUpperCase()}`, 'success')
+            if (selectedVehicle) {
+                setSelectedVehicle({ ...selectedVehicle, status: newStatus })
+            }
+            fetchVehicles()
+        }
+    }
+
+    async function handleSoftDelete(vehicleId: string, plate: string) {
+        setConfirmModal({
+            title: 'Confirm Soft Delete',
+            message: `Are you sure you want to move vehicle "${plate}" to trash?`,
+            confirmText: 'Move to Trash',
+            confirmVariant: 'danger',
+            onConfirm: async () => {
+                setConfirmModal(null)
+                const { error } = await supabase
+                    .from('vehicles')
+                    .update({ is_deleted: true })
+                    .eq('id', vehicleId)
+
+                if (error) {
+                    showToast('Error deleting vehicle: ' + error.message, 'error')
+                } else {
+                    showToast('Vehicle moved to trash.', 'success')
+                    if (selectedVehicle?.id === vehicleId) setSelectedVehicle(null)
+                    fetchAllData()
+                }
+            }
+        })
+    }
+
+    async function handleRestoreVehicle(vehicleId: string) {
+        const { error } = await supabase
+            .from('vehicles')
+            .update({ is_deleted: false })
+            .eq('id', vehicleId)
+
+        if (error) {
+            showToast('Error restoring vehicle: ' + error.message, 'error')
+        } else {
+            showToast('Vehicle restored successfully!', 'success')
+            fetchAllData()
+        }
+    }
+
     async function handleDownload(url: string, title: string) {
         try {
-            showToast('Preparing file download...', 'success')
+            showToast('Preparing download...', 'success')
             const res = await fetch(url)
             const blob = await res.blob()
             const blobUrl = URL.createObjectURL(blob)
@@ -250,108 +334,10 @@ export default function AdminDashboard() {
         }
     }
 
-    function requestStatusOverride(newStatus: string) {
-        if (!selectedVehicle) return
-        const formattedStatus = newStatus.replace(/_/g, ' ').toUpperCase()
-
-        setConfirmModal({
-            title: 'Confirm Admin Status Override',
-            message: `Override vehicle ${selectedVehicle.plate_number}'s status directly to "${formattedStatus}"?`,
-            confirmText: 'Override Status',
-            confirmVariant: 'primary',
-            onConfirm: () => executeStatusOverride(newStatus),
-        })
-    }
-
-    async function executeStatusOverride(newStatus: string) {
-        setConfirmModal(null)
-        if (!selectedVehicle) return
-
-        const { error } = await supabase
-            .from('vehicles')
-            .update({ status: newStatus, updated_at: new Date().toISOString() })
-            .eq('id', selectedVehicle.id)
-
-        if (error) {
-            showToast('Error overriding status: ' + error.message, 'error')
-        } else {
-            showToast(`Status overridden to ${newStatus.replace(/_/g, ' ').toUpperCase()}`, 'success')
-            setSelectedVehicle({ ...selectedVehicle, status: newStatus })
-            fetchVehicles()
-        }
-    }
-
-    function requestSoftDeleteVehicle(v: Vehicle) {
-        setConfirmModal({
-            title: 'Confirm Soft Delete',
-            message: `Archive vehicle ${v.plate_number}? It will be moved to the Trash bin and hidden from active views.`,
-            confirmText: 'Archive Vehicle',
-            confirmVariant: 'danger',
-            onConfirm: () => executeSoftDeleteVehicle(v.id),
-        })
-    }
-
-    async function executeSoftDeleteVehicle(vehicleId: string) {
-        setConfirmModal(null)
-        const { error } = await supabase
-            .from('vehicles')
-            .update({ is_deleted: true, updated_at: new Date().toISOString() })
-            .eq('id', vehicleId)
-
-        if (error) {
-            showToast('Error archiving vehicle: ' + error.message, 'error')
-        } else {
-            showToast('Vehicle archived to trash.', 'success')
-            if (selectedVehicle?.id === vehicleId) setSelectedVehicle(null)
-            fetchVehicles()
-            fetchDeletedVehicles()
-        }
-    }
-
-    async function executeRestoreVehicle(vehicleId: string) {
-        const { error } = await supabase
-            .from('vehicles')
-            .update({ is_deleted: false, updated_at: new Date().toISOString() })
-            .eq('id', vehicleId)
-
-        if (error) {
-            showToast('Error restoring vehicle: ' + error.message, 'error')
-        } else {
-            showToast('Vehicle restored to active registry!', 'success')
-            fetchVehicles()
-            fetchDeletedVehicles()
-        }
-    }
-
-    function requestRoleChange(userId: string, newRole: string, username: string) {
-        setConfirmModal({
-            title: 'Confirm Staff Role Change',
-            message: `Change user "${username}"'s role to "${newRole.toUpperCase()}"?`,
-            confirmText: 'Update Role',
-            confirmVariant: 'success',
-            onConfirm: () => executeRoleChange(userId, newRole),
-        })
-    }
-
-    async function executeRoleChange(userId: string, newRole: string) {
-        setConfirmModal(null)
-        const { error } = await supabase
-            .from('users')
-            .update({ role: newRole })
-            .eq('id', userId)
-
-        if (error) {
-            showToast('Failed to update role: ' + error.message, 'error')
-        } else {
-            showToast('Staff role updated successfully.', 'success')
-            fetchStaffUsers()
-        }
-    }
-
     function requestLogout() {
         setConfirmModal({
             title: 'Confirm Sign Out',
-            message: 'Are you sure you want to sign out of the Admin Control Hub?',
+            message: 'Are you sure you want to sign out of the Admin Hub?',
             confirmText: 'Sign Out',
             confirmVariant: 'danger',
             onConfirm: () => executeLogout(),
@@ -367,11 +353,10 @@ export default function AdminDashboard() {
         window.location.href = '/login'
     }
 
-    const additionalPhotos = mediaItems.filter(m => m.media_type === 'photo_additional')
     const isDark = theme === 'dark'
 
     return (
-        <div className={`min-h-screen relative selection:bg-purple-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
+        <div className={`min-h-screen pb-16 relative selection:bg-purple-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
             {toast && (
                 <div className="fixed top-6 right-6 z-50 animate-bounce">
                     <div className={`px-5 py-3 rounded-2xl shadow-2xl text-xs font-bold flex items-center gap-3 border ${toast.type === 'success'
@@ -384,11 +369,12 @@ export default function AdminDashboard() {
                 </div>
             )}
 
+            {/* Confirmation Modal */}
             {confirmModal && (
-                <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
                     <div className={`border rounded-3xl shadow-2xl max-w-sm w-full p-6 text-center ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
                         <div className={`w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center text-xl font-bold border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>
-                            {confirmModal.confirmVariant === 'danger' ? '⚠️' : confirmModal.confirmVariant === 'success' ? '✅' : '⚙️'}
+                            {confirmModal.confirmVariant === 'danger' ? '⚠️' : confirmModal.confirmVariant === 'success' ? '✅' : '❓'}
                         </div>
                         <h3 className={`text-lg font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>{confirmModal.title}</h3>
                         <p className={`text-xs mt-2 font-medium leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{confirmModal.message}</p>
@@ -420,12 +406,12 @@ export default function AdminDashboard() {
 
             {/* Settings Modal */}
             {showSettingsModal && (
-                <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto py-10">
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto py-10">
                     <div className={`border rounded-3xl shadow-2xl max-w-md w-full p-8 max-h-[90vh] overflow-y-auto ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
                         <div className="flex justify-between items-center mb-6">
                             <div>
                                 <h3 className={`text-xl font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>Admin Account Settings</h3>
-                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Manage appearance, profile, and credentials.</p>
+                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Manage appearance, profile, and master credentials.</p>
                             </div>
                             <button onClick={() => setShowSettingsModal(false)} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}>&times;</button>
                         </div>
@@ -533,7 +519,7 @@ export default function AdminDashboard() {
 
             {/* Media Preview Modal */}
             {previewMedia && (
-                <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
                     <div className={`border rounded-3xl shadow-2xl max-w-3xl w-full p-6 flex flex-col max-h-[90vh] ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
                         <div className={`flex justify-between items-center pb-4 border-b ${isDark ? 'border-slate-800 text-white' : 'border-slate-200 text-slate-900'}`}>
                             <h3 className="text-base font-extrabold truncate">{previewMedia.title}</h3>
@@ -546,21 +532,17 @@ export default function AdminDashboard() {
                         </div>
 
                         <div className={`py-4 flex-1 overflow-auto flex items-center justify-center rounded-2xl my-4 border p-2 ${isDark ? 'bg-slate-950 border-slate-800/80' : 'bg-slate-50 border-slate-200'}`}>
-                            {previewMedia.url.includes('.pdf') ? (
-                                <iframe src={previewMedia.url} className="w-full h-[60vh] rounded-xl border-0" title={previewMedia.title} />
-                            ) : (
-                                <img
-                                    src={previewMedia.url}
-                                    alt={previewMedia.title}
-                                    className="max-h-[60vh] w-auto object-contain rounded-xl shadow-md"
-                                />
-                            )}
+                            <img
+                                src={previewMedia.url}
+                                alt={previewMedia.title}
+                                className="max-h-[60vh] w-auto object-contain rounded-xl shadow-md"
+                            />
                         </div>
 
                         <div className={`flex flex-wrap justify-end gap-3 pt-2 border-t ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
                             <button
                                 onClick={() => handleDownload(previewMedia.url, previewMedia.title)}
-                                className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+                                className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
                             >
                                 💾 Save File
                             </button>
@@ -583,17 +565,20 @@ export default function AdminDashboard() {
                 </div>
             )}
 
-            <header className={`border-b shadow-lg ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 text-slate-900'}`}>
+            {/* Header */}
+            <header className={`border-b sticky top-0 z-20 shadow-lg backdrop-blur-md ${isDark ? 'bg-slate-950/90 border-slate-800 text-white' : 'bg-white/90 border-slate-200 text-slate-900'}`}>
                 <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-                    <div className="flex items-center gap-4">
-                        <h1 className={`text-xl font-black tracking-tight flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                            🛡️ Workshop Admin Hub
-                            <span className="text-xs bg-purple-950 text-purple-300 px-3 py-1 rounded-full border border-purple-800/60 font-bold uppercase tracking-wider">
-                                System Administrator
-                            </span>
-                        </h1>
-                    </div>
                     <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-2xl bg-purple-600/20 border border-purple-500/40 flex items-center justify-center text-purple-400 font-black text-base">
+                            👑
+                        </div>
+                        <div>
+                            <h1 className="text-base font-extrabold tracking-tight">System Admin Control Hub</h1>
+                            <p className={`text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Master Supervision, Financials & Staff Governance</p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-2.5">
                         <button
                             onClick={() => setTheme(isDark ? 'light' : 'dark')}
                             className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-amber-600 border-slate-200'}`}
@@ -602,331 +587,277 @@ export default function AdminDashboard() {
                             {isDark ? '☀️ Light' : '🌙 Dark'}
                         </button>
                         <Link
-                            href="/"
-                            className={`font-semibold px-3.5 py-2 rounded-xl text-xs border transition-colors ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}
+                            href="/technician"
+                            className={`font-bold px-3.5 py-2 rounded-xl text-xs border transition-all ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-slate-700' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}
                         >
-                            Front Desk View &rarr;
+                            🔧 Technician Portal &rarr;
                         </Link>
                         <button
                             onClick={() => setShowSettingsModal(true)}
-                            className={`font-semibold px-3.5 py-2 rounded-xl text-xs border transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
+                            className={`font-semibold px-3.5 py-2 rounded-xl text-xs border transition-all cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
                         >
                             ⚙️ Settings
                         </button>
                         <button
                             onClick={requestLogout}
-                            className="bg-rose-600 hover:bg-rose-500 text-white font-semibold px-3.5 py-2 rounded-xl text-xs shadow transition-all cursor-pointer"
+                            className="bg-rose-600 hover:bg-rose-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs shadow transition-all cursor-pointer"
                         >
                             Sign Out
                         </button>
                     </div>
                 </div>
-
-                <div className={`max-w-7xl mx-auto px-6 flex gap-6 border-t pt-3 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                    <button
-                        onClick={() => { setActiveTab('vehicles'); setSelectedVehicle(null); }}
-                        className={`pb-3 text-xs font-bold tracking-wider uppercase border-b-2 cursor-pointer transition-all ${activeTab === 'vehicles' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-                            }`}
-                    >
-                        🚗 Active Vehicles ({vehicles.length})
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('staff')}
-                        className={`pb-3 text-xs font-bold tracking-wider uppercase border-b-2 cursor-pointer transition-all ${activeTab === 'staff' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-                            }`}
-                    >
-                        👥 Staff Governance ({staffUsers.length})
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('trash')}
-                        className={`pb-3 text-xs font-bold tracking-wider uppercase border-b-2 cursor-pointer transition-all ${activeTab === 'trash' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-                            }`}
-                    >
-                        🗑️ Archive / Trash ({deletedVehicles.length})
-                    </button>
-                </div>
             </header>
 
             <main className="max-w-7xl mx-auto px-6 py-8">
-                {activeTab === 'vehicles' && (
-                    selectedVehicle ? (
-                        <div>
-                            <button
-                                onClick={() => setSelectedVehicle(null)}
-                                className="mb-6 text-xs font-bold text-purple-400 hover:text-purple-300 flex items-center gap-1.5 transition-colors cursor-pointer"
-                            >
-                                &larr; Back to Admin Vehicle Directory
-                            </button>
+                {/* Navigation Tabs */}
+                <div className="flex gap-3 mb-8 border-b pb-4 border-slate-800/40">
+                    <button
+                        onClick={() => { setActiveTab('vehicles'); setSelectedVehicle(null); }}
+                        className={`px-5 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer border ${activeTab === 'vehicles'
+                                ? 'bg-purple-600 text-white border-purple-500 shadow-md'
+                                : isDark ? 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                    >
+                        🚗 Vehicle Master Registry ({vehicles.length})
+                    </button>
+                    <button
+                        onClick={() => { setActiveTab('users'); setSelectedVehicle(null); }}
+                        className={`px-5 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer border ${activeTab === 'users'
+                                ? 'bg-purple-600 text-white border-purple-500 shadow-md'
+                                : isDark ? 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                    >
+                        👥 Staff & User Management ({users.length})
+                    </button>
+                    <button
+                        onClick={() => { setActiveTab('trash'); setSelectedVehicle(null); }}
+                        className={`px-5 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer border ${activeTab === 'trash'
+                                ? 'bg-purple-600 text-white border-purple-500 shadow-md'
+                                : isDark ? 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                    >
+                        🗑️ Trash / Recovery ({deletedVehicles.length})
+                    </button>
+                </div>
 
-                            <div className={`rounded-3xl border p-8 mb-8 shadow-xl ${isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
-                                <div className={`flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
-                                    <div>
-                                        <div className="flex items-center gap-3">
-                                            <h2 className="text-3xl font-black">{selectedVehicle.plate_number}</h2>
-                                            <span className="px-3.5 py-1 rounded-full text-xs font-bold uppercase bg-purple-950 text-purple-300 border border-purple-800/60">
-                                                {selectedVehicle.status.replace(/_/g, ' ')}
-                                            </span>
-                                        </div>
-                                        <p className="text-slate-400 mt-1 font-medium text-sm">{selectedVehicle.make_model_year} • VIN: {selectedVehicle.chassis_number}</p>
-                                    </div>
-
-                                    <div className={`flex items-center gap-2 p-2.5 rounded-2xl border ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider pl-2">Override Status:</span>
-                                        <select
-                                            value={selectedVehicle.status}
-                                            onChange={(e) => requestStatusOverride(e.target.value)}
-                                            className={`border text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none cursor-pointer ${isDark ? 'bg-slate-900 border-slate-700 text-purple-300' : 'bg-white border-slate-300 text-purple-700'}`}
-                                        >
-                                            <option value="intake">Intake</option>
-                                            <option value="pending_before_photos">Pending Before Photos</option>
-                                            <option value="in_repair">In Repair</option>
-                                            <option value="pending_after_photos">Pending After Photos</option>
-                                            <option value="road_ready">Road Ready</option>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div className={`grid grid-cols-1 md:grid-cols-4 gap-4 py-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
-                                    <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Intake Cost</p>
-                                        <p className="text-xl font-black mt-1">RM {selectedVehicle.intake_cost?.toLocaleString()}</p>
-                                    </div>
-                                    <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Market Value</p>
-                                        <p className="text-xl font-black mt-1">RM {selectedVehicle.market_value?.toLocaleString()}</p>
-                                    </div>
-                                    <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Repair Cost</p>
-                                        <p className="text-xl font-black mt-1">RM {selectedVehicle.repair_cost?.toLocaleString()}</p>
-                                    </div>
-                                    <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Est. Margin / Net</p>
-                                        <p className="text-xl font-black text-emerald-400 mt-1">
-                                            RM {((selectedVehicle.market_value || 0) - (selectedVehicle.intake_cost || 0) - (selectedVehicle.repair_cost || 0)).toLocaleString()}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div className="pt-6">
-                                    <h3 className="text-sm font-bold uppercase tracking-wider mb-4">1. Front Desk Verified Documents</h3>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                                        {['grant', 'jpj', 'insurance', 'ber'].map((cat) => {
-                                            const doc = mediaItems.find(m => m.media_type === 'document' && m.category === cat)
-                                            const docLabel =
-                                                cat === 'grant' ? 'Vehicle Grant (VOC)' :
-                                                    cat === 'jpj' ? 'JPJ Inspection' :
-                                                        cat === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
-
-                                            return (
-                                                <div key={cat} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                                    <div>
-                                                        <p className="text-xs font-bold uppercase tracking-wider mb-1">{docLabel}</p>
-                                                        <p className={`text-[11px] font-semibold mb-4 ${doc ? 'text-emerald-400' : 'text-slate-500'}`}>
-                                                            {doc ? '✓ Verified File Attached' : 'Not Uploaded'}
-                                                        </p>
-                                                    </div>
-                                                    {doc && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setPreviewMedia({ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${docLabel}` })}
-                                                            className={`w-full text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-700 border-slate-300'}`}
-                                                        >
-                                                            Inspect Document &rarr;
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
-
-                                <div className="pt-8">
-                                    <h3 className="text-sm font-bold uppercase tracking-wider mb-4">2. Technician Evidence Audit (8 Angles)</h3>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        {PHOTO_CATEGORIES.map((cat) => {
-                                            const before = mediaItems.find(m => m.media_type === 'photo_before' && m.category === cat.key)
-                                            const after = mediaItems.find(m => m.media_type === 'photo_after' && m.category === cat.key)
-
-                                            return (
-                                                <div key={cat.key} className={`border rounded-2xl p-4 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                                    <p className="text-xs font-bold uppercase tracking-wider mb-3">{cat.label}</p>
-                                                    <div className="grid grid-cols-2 gap-3 text-center">
-                                                        <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-                                                            <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider mb-2">Before Repair</p>
-                                                            {before ? (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setPreviewMedia({ url: before.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })}
-                                                                    className={`w-full py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}
-                                                                >
-                                                                    Inspect Photo
-                                                                </button>
-                                                            ) : (
-                                                                <span className="text-[11px] text-slate-500 italic">Missing</span>
-                                                            )}
-                                                        </div>
-
-                                                        <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-                                                            <p className="text-[10px] font-bold text-blue-400 uppercase tracking-wider mb-2">After Repair</p>
-                                                            {after ? (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setPreviewMedia({ url: after.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })}
-                                                                    className={`w-full py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-blue-400 border-slate-700' : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'}`}
-                                                                >
-                                                                    Inspect Photo
-                                                                </button>
-                                                            ) : (
-                                                                <span className="text-[11px] text-slate-500 italic">Missing</span>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
-
-                                {additionalPhotos.length > 0 && (
-                                    <div className="pt-8">
-                                        <h3 className="text-sm font-bold text-purple-300 uppercase tracking-wider mb-4">3. Additional Evidence Photos ({additionalPhotos.length})</h3>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                                            {additionalPhotos.map((item) => {
-                                                const displayTitle = item.category.replace(/^extra_/, '').replace(/_[0-9]+$/, '').replace(/_/g, ' ')
-                                                return (
-                                                    <div key={item.id} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                                        <div>
-                                                            <p className="text-xs font-bold text-purple-300 uppercase tracking-wider mb-1 capitalize">{displayTitle}</p>
-                                                            <p className="text-[11px] font-semibold text-emerald-400 mb-4">✓ Extra Evidence Photo</p>
-                                                        </div>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setPreviewMedia({ url: item.file_url, title: `${selectedVehicle.plate_number} - ${displayTitle}` })}
-                                                            className={`w-full text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-700 border-slate-300'}`}
-                                                        >
-                                                            Inspect Photo &rarr;
-                                                        </button>
-                                                    </div>
-                                                )
-                                            })}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    ) : (
-                        <div>
-                            <div className="flex justify-between items-center mb-6">
-                                <div>
-                                    <h2 className="text-2xl font-black">Active Vehicle Registry</h2>
-                                    <p className="text-xs text-slate-400 font-medium mt-0.5">Supervise all active cases, inspect documentation, and perform status overrides.</p>
-                                </div>
-                            </div>
-
-                            <div className={`border rounded-2xl overflow-hidden shadow-xl ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-                                {loading ? (
-                                    <div className="p-16 text-center text-slate-500 font-medium">Loading vehicle inventory...</div>
-                                ) : vehicles.length === 0 ? (
-                                    <div className="p-16 text-center text-slate-500 font-medium">No active vehicles found in registry.</div>
-                                ) : (
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-left border-collapse">
-                                            <thead>
-                                                <tr className={`text-[11px] uppercase font-bold tracking-wider border-b ${isDark ? 'bg-slate-950/80 text-slate-400 border-slate-800' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-                                                    <th className="p-4">Plate Number</th>
-                                                    <th className="p-4">Make / Model / Year</th>
-                                                    <th className="p-4">Status</th>
-                                                    <th className="p-4">Intake Cost</th>
-                                                    <th className="p-4">Market Value</th>
-                                                    <th className="p-4 text-right">Admin Actions</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-100 text-slate-700'}`}>
-                                                {vehicles.map((v) => (
-                                                    <tr key={v.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}`}>
-                                                        <td className="p-4 font-bold text-purple-400">{v.plate_number}</td>
-                                                        <td className="p-4">{v.make_model_year}</td>
-                                                        <td className="p-4">
-                                                            <span className="px-3 py-1 rounded-full text-[11px] font-bold uppercase bg-purple-950 text-purple-300 border border-purple-800/60">
-                                                                {v.status.replace(/_/g, ' ')}
-                                                            </span>
-                                                        </td>
-                                                        <td className="p-4 font-bold">RM {v.intake_cost?.toLocaleString()}</td>
-                                                        <td className="p-4 font-bold">RM {v.market_value?.toLocaleString()}</td>
-                                                        <td className="p-4 text-right">
-                                                            <div className="flex justify-end gap-2">
-                                                                <button
-                                                                    onClick={() => setSelectedVehicle(v)}
-                                                                    className="bg-purple-950 hover:bg-purple-900 text-purple-300 border border-purple-800/80 px-3 py-1.5 rounded-xl font-bold transition-colors cursor-pointer"
-                                                                >
-                                                                    Inspect Case &rarr;
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => requestSoftDeleteVehicle(v)}
-                                                                    className="bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-900 px-3 py-1.5 rounded-xl font-bold transition-colors cursor-pointer"
-                                                                >
-                                                                    Archive
-                                                                </button>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )
-                )}
-
-                {activeTab === 'staff' && (
+                {/* TAB 1: VEHICLES MANAGEMENT */}
+                {activeTab === 'vehicles' && !selectedVehicle && (
                     <div>
                         <div className="flex justify-between items-center mb-6">
                             <div>
-                                <h2 className="text-2xl font-black">Staff Account Governance</h2>
-                                <p className="text-xs text-slate-400 font-medium mt-0.5">Manage staff authority roles (`admin`, `front_desk`, `technician`, `bidder`).</p>
+                                <h2 className={`text-xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Vehicle Fleet Supervisory Registry</h2>
+                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Click any vehicle to inspect financials, technician before/after photo evidence, and perform status overrides.</p>
                             </div>
                         </div>
 
-                        <div className={`border rounded-2xl overflow-hidden shadow-xl ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                        {loading ? (
+                            <div className="p-16 text-center text-slate-500 font-medium">Loading fleet database...</div>
+                        ) : vehicles.length === 0 ? (
+                            <div className={`p-16 text-center rounded-3xl border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-600'}`}>
+                                No vehicles found in the master registry.
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                                {vehicles.map((v) => (
+                                    <div
+                                        key={v.id}
+                                        onClick={() => selectVehicle(v)}
+                                        className={`border rounded-3xl p-6 cursor-pointer transition-all hover:shadow-xl flex flex-col justify-between ${isDark
+                                                ? 'bg-slate-950 border-slate-800 hover:border-purple-500/80'
+                                                : 'bg-white border-slate-200 hover:border-purple-500/80 hover:shadow-md'
+                                            }`}
+                                    >
+                                        <div>
+                                            <div className="flex justify-between items-start mb-3">
+                                                <h3 className={`text-lg font-black tracking-tight ${isDark ? 'text-white' : 'text-blue-950'}`}>{v.plate_number}</h3>
+                                                <span className="px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-purple-950 text-purple-300 border border-purple-800/60">
+                                                    {v.status.replace(/_/g, ' ')}
+                                                </span>
+                                            </div>
+                                            <p className={`text-xs font-semibold mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{v.make_model_year}</p>
+
+                                            <div className="grid grid-cols-2 gap-2 mb-4">
+                                                <div className={`p-2.5 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                                    <p className="text-[10px] uppercase font-bold text-slate-400">Intake Cost</p>
+                                                    <p className="text-xs font-black text-rose-400">RM {Number(v.intake_cost || 0).toLocaleString()}</p>
+                                                </div>
+                                                <div className={`p-2.5 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                                    <p className="text-[10px] uppercase font-bold text-slate-400">Market Value</p>
+                                                    <p className="text-xs font-black text-emerald-400">RM {Number(v.market_value || 0).toLocaleString()}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex gap-2">
+                                            <button
+                                                type="button"
+                                                className="w-full bg-purple-600 hover:bg-purple-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer flex items-center justify-center gap-1.5"
+                                            >
+                                                Inspect Case File &rarr;
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => { e.stopPropagation(); handleSoftDelete(v.id, v.plate_number); }}
+                                                className="bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2.5 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer"
+                                                title="Move to Trash"
+                                            >
+                                                🗑️
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* VEHICLE DETAIL & EVIDENCE AUDIT INSPECTOR */}
+                {activeTab === 'vehicles' && selectedVehicle && (
+                    <div>
+                        <button
+                            onClick={() => setSelectedVehicle(null)}
+                            className={`mb-6 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer px-3.5 py-2 rounded-xl border w-fit shadow-xs ${isDark ? 'bg-slate-950 text-purple-400 hover:text-purple-300 border-slate-800' : 'bg-white text-purple-600 hover:text-purple-700 border-slate-200'}`}
+                        >
+                            &larr; Back to Fleet Registry
+                        </button>
+
+                        {/* Vehicle Header Overview & Admin Status Override */}
+                        <div className={`rounded-3xl border p-8 mb-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                                <div>
+                                    <div className="flex items-center gap-3">
+                                        <h2 className="text-3xl font-black tracking-tight">{selectedVehicle.plate_number}</h2>
+                                        <span className="px-3.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-purple-950 text-purple-300 border border-purple-800/60">
+                                            {selectedVehicle.status.replace(/_/g, ' ')}
+                                        </span>
+                                    </div>
+                                    <p className="text-xs font-semibold text-slate-400 mt-1">{selectedVehicle.make_model_year} • VIN: {selectedVehicle.chassis_number}</p>
+                                </div>
+
+                                {/* Admin Status Override Selector */}
+                                <div className={`p-4 rounded-2xl border flex items-center gap-3 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                    <span className="text-xs font-black uppercase text-purple-400">Admin Override Status:</span>
+                                    <select
+                                        value={selectedVehicle.status}
+                                        onChange={(e) => handleStatusOverride(selectedVehicle.id, e.target.value)}
+                                        className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                                    >
+                                        <option value="pending_before_photos">Pending Before Photos</option>
+                                        <option value="in_repair">In Repair</option>
+                                        <option value="pending_after_photos">Pending After Photos</option>
+                                        <option value="road_ready">Road Ready</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Evidence & Photo Audit Grids */}
+                        <div className="space-y-8">
+                            {/* BEFORE PHOTOS */}
+                            <div className={`rounded-3xl border p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                                <h3 className="text-sm font-extrabold uppercase tracking-wider mb-6 pb-4 border-b border-slate-800/50">
+                                    Technician "Before" Photos ({mediaItems.filter(m => m.media_type === 'photo_before').length}/8 Captured)
+                                </h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    {PHOTO_CATEGORIES.map((cat) => {
+                                        const uploaded = mediaItems.find(m => m.category === cat.key && m.media_type === 'photo_before')
+                                        return (
+                                            <div key={cat.key} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                                <div>
+                                                    <p className="text-xs font-extrabold uppercase tracking-wider mb-1">{cat.label}</p>
+                                                    <p className={`text-xs font-semibold mb-4 ${uploaded ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                        {uploaded ? '✓ Captured' : 'Missing'}
+                                                    </p>
+                                                </div>
+                                                {uploaded && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setPreviewMedia({ url: uploaded.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })}
+                                                        className="w-full text-center bg-slate-800 hover:bg-slate-700 text-purple-300 py-2 rounded-xl text-xs font-bold transition-colors border border-slate-700 cursor-pointer"
+                                                    >
+                                                        View Photo
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* AFTER PHOTOS */}
+                            <div className={`rounded-3xl border p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                                <h3 className="text-sm font-extrabold uppercase tracking-wider mb-6 pb-4 border-b border-slate-800/50">
+                                    Technician "After" Photos ({mediaItems.filter(m => m.media_type === 'photo_after').length}/8 Captured)
+                                </h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    {PHOTO_CATEGORIES.map((cat) => {
+                                        const uploaded = mediaItems.find(m => m.category === cat.key && m.media_type === 'photo_after')
+                                        return (
+                                            <div key={cat.key} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                                <div>
+                                                    <p className="text-xs font-extrabold uppercase tracking-wider mb-1">{cat.label}</p>
+                                                    <p className={`text-xs font-semibold mb-4 ${uploaded ? 'text-blue-400' : 'text-slate-500'}`}>
+                                                        {uploaded ? '✓ Captured' : 'Pending / Not Yet Captured'}
+                                                    </p>
+                                                </div>
+                                                {uploaded && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setPreviewMedia({ url: uploaded.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })}
+                                                        className="w-1/2 text-center bg-slate-800 hover:bg-slate-700 text-blue-300 py-2 rounded-xl text-xs font-bold transition-colors border border-slate-700 cursor-pointer"
+                                                    >
+                                                        View Photo
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* TAB 2: USER & STAFF MANAGEMENT */}
+                {activeTab === 'users' && (
+                    <div>
+                        <div className="flex justify-between items-center mb-6">
+                            <div>
+                                <h2 className={`text-xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Staff Account & Role Governance</h2>
+                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Modify staff roles between Administrator, Front Desk, and Workshop Technician.</p>
+                            </div>
+                        </div>
+
+                        <div className={`rounded-3xl border overflow-hidden shadow-xl ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
                             <div className="overflow-x-auto">
                                 <table className="w-full text-left border-collapse">
                                     <thead>
-                                        <tr className={`text-[11px] uppercase font-bold tracking-wider border-b ${isDark ? 'bg-slate-950/80 text-slate-400 border-slate-800' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-                                            <th className="p-4">Staff Member</th>
-                                            <th className="p-4">Username</th>
-                                            <th className="p-4">Email</th>
+                                        <tr className={`border-b text-xs font-extrabold uppercase tracking-wider ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700'}`}>
+                                            <th className="p-4">Full Name</th>
+                                            <th className="p-4">Username / ID</th>
                                             <th className="p-4">Current Role</th>
-                                            <th className="p-4">Change Role Authority</th>
+                                            <th className="p-4 text-right">Change Role</th>
                                         </tr>
                                     </thead>
-                                    <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-100 text-slate-700'}`}>
-                                        {staffUsers.map((u) => (
-                                            <tr key={u.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}`}>
-                                                <td className="p-4 font-bold">{u.full_name || 'Staff Member'}</td>
-                                                <td className="p-4 text-purple-400 font-mono">{u.username}</td>
-                                                <td className="p-4">{u.email || 'N/A'}</td>
+                                    <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
+                                        {users.map((u) => (
+                                            <tr key={u.id} className={`transition-colors ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
+                                                <td className={`p-4 font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{u.full_name || 'N/A'}</td>
+                                                <td className="p-4 font-mono text-slate-400">{u.username || u.id}</td>
                                                 <td className="p-4">
-                                                    <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${u.role === 'admin'
-                                                            ? 'bg-purple-950 text-purple-300 border-purple-800'
-                                                            : u.role === 'technician'
-                                                                ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
-                                                                : 'bg-blue-950 text-blue-300 border-blue-800'
-                                                        }`}>
+                                                    <span className="px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-purple-950 text-purple-300 border border-purple-800/60">
                                                         {u.role}
                                                     </span>
                                                 </td>
-                                                <td className="p-4">
+                                                <td className="p-4 text-right">
                                                     <select
                                                         value={u.role}
-                                                        onChange={(e) => requestRoleChange(u.id, e.target.value, u.username)}
-                                                        className={`border text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none cursor-pointer ${isDark ? 'bg-slate-950 border-slate-700 text-slate-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                                                        onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
+                                                        className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
                                                     >
-                                                        <option value="admin">Admin</option>
-                                                        <option value="front_desk">Front Desk</option>
-                                                        <option value="technician">Technician</option>
-                                                        <option value="bidder">Bidder</option>
+                                                        <option value="admin">admin</option>
+                                                        <option value="front_desk">front_desk</option>
+                                                        <option value="technician">technician</option>
                                                     </select>
                                                 </td>
                                             </tr>
@@ -938,50 +869,39 @@ export default function AdminDashboard() {
                     </div>
                 )}
 
+                {/* TAB 3: TRASH / RECOVERY */}
                 {activeTab === 'trash' && (
                     <div>
                         <div className="flex justify-between items-center mb-6">
                             <div>
-                                <h2 className="text-2xl font-black">Archived Vehicles Trash Bin</h2>
-                                <p className="text-xs text-slate-400 font-medium mt-0.5">Soft-deleted vehicles are stored here and can be restored anytime.</p>
+                                <h2 className={`text-xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Archived / Deleted Vehicles</h2>
+                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Restore accidentally deleted vehicle cases back into the active fleet registry.</p>
                             </div>
                         </div>
 
-                        <div className={`border rounded-2xl overflow-hidden shadow-xl ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-                            {deletedVehicles.length === 0 ? (
-                                <div className="p-16 text-center text-slate-500 font-medium">Trash bin is clean. No archived vehicles.</div>
-                            ) : (
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-left border-collapse">
-                                        <thead>
-                                            <tr className={`text-[11px] uppercase font-bold tracking-wider border-b ${isDark ? 'bg-slate-950/80 text-slate-400 border-slate-800' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-                                                <th className="p-4">Plate Number</th>
-                                                <th className="p-4">Make / Model / Year</th>
-                                                <th className="p-4">Last Known Status</th>
-                                                <th className="p-4 text-right">Restore Action</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-100 text-slate-700'}`}>
-                                            {deletedVehicles.map((v) => (
-                                                <tr key={v.id} className={`transition-colors ${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}`}>
-                                                    <td className="p-4 font-bold text-rose-400">{v.plate_number}</td>
-                                                    <td className="p-4">{v.make_model_year}</td>
-                                                    <td className="p-4 capitalize text-slate-400">{v.status.replace(/_/g, ' ')}</td>
-                                                    <td className="p-4 text-right">
-                                                        <button
-                                                            onClick={() => executeRestoreVehicle(v.id)}
-                                                            className="bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 px-3 py-1.5 rounded-xl font-bold transition-colors cursor-pointer"
-                                                        >
-                                                            Restore Vehicle ↺
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </div>
+                        {deletedVehicles.length === 0 ? (
+                            <div className={`p-16 text-center rounded-3xl border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-600'}`}>
+                                Trash is completely empty.
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                                {deletedVehicles.map((v) => (
+                                    <div key={v.id} className={`border rounded-3xl p-6 flex flex-col justify-between ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
+                                        <div>
+                                            <h3 className={`text-lg font-black tracking-tight mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>{v.plate_number}</h3>
+                                            <p className={`text-xs font-semibold mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{v.make_model_year}</p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleRestoreVehicle(v.id)}
+                                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+                                        >
+                                            Restore Vehicle &rarr;
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
             </main>
