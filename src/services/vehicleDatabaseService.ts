@@ -75,8 +75,8 @@ export function getModelsForMake(make: string) {
 }
 
 export function getYearsForVehicle() {
-    const currentYear = new Date().getFullYear()
-    return Array.from(new Array(30), (_, i) => currentYear - i)
+    const baseYear = 2026
+    return Array.from(new Array(30), (_, i) => baseYear - i)
 }
 
 export function getVariantsForModel(make: string, model: string) {
