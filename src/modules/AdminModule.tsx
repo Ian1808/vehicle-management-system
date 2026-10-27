@@ -17,6 +17,7 @@ import StaffUserModal, { type StaffUserPayload } from '@/components/admin/StaffU
 import ChangePasswordModal from '@/components/admin/ChangePasswordModal'
 import BankModal, { type BankPayload, type BankRecord } from '@/components/admin/BankModal'
 import VehicleAuditGrid from '@/components/admin/VehicleAuditGrid'
+import AdditionalPhotosGrid from '@/components/admin/AdditionalPhotosGrid'
 
 type Vehicle = {
     id: string
@@ -78,7 +79,7 @@ const TABS = [
 
 const ROLE_FILTERS = ['all', 'admin', 'front_desk', 'technician'] as const
 
-export default function AdminHub() {
+export default function AdminModule() {
     const [activeTab, setActiveTab] = useState<'vehicles' | 'users' | 'banks' | 'trash'>('vehicles')
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [deletedVehicles, setDeletedVehicles] = useState<Vehicle[]>([])
@@ -632,13 +633,13 @@ export default function AdminHub() {
                             {isDark ? '☀️ Light' : '🌙 Dark'}
                         </button>
                         <Link
-                            href="/"
+                            href="/?tab=frontdesk"
                             className={`font-bold px-3.5 py-2 rounded-xl text-xs border transition-all ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-blue-300 border-slate-700' : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'}`}
                         >
                             📋 Front Desk
                         </Link>
                         <Link
-                            href="/technician"
+                            href="/?tab=technician"
                             className={`font-bold px-3.5 py-2 rounded-xl text-xs border transition-all ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-slate-700' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}
                         >
                             🔧 Technician Portal
@@ -801,6 +802,13 @@ export default function AdminHub() {
                                 title={`Technician "After" Photos (${mediaItems.filter(m => m.media_type === 'photo_after').length}/8 Captured)`}
                                 mediaItems={mediaItems}
                                 phase="after"
+                                vehiclePlate={selectedVehicle.plate_number}
+                                onView={(url, title) => setPreviewMedia({ url, title })}
+                            />
+
+                            <AdditionalPhotosGrid
+                                isDark={isDark}
+                                mediaItems={mediaItems}
                                 vehiclePlate={selectedVehicle.plate_number}
                                 onView={(url, title) => setPreviewMedia({ url, title })}
                             />

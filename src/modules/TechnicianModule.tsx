@@ -45,7 +45,7 @@ type ConfirmState = {
 } | null
 type PreviewState = { url: string; title: string } | null
 
-export default function TechnicianPortal() {
+export default function TechnicianModule() {
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
@@ -491,9 +491,11 @@ export default function TechnicianPortal() {
                             {isDark ? '☀️' : '🌙'}
                         </button>
                         {userRole === 'admin' && (
-                            <Link href="/admin" className="font-bold px-3.5 py-2 rounded-xl text-xs border border-purple-800 bg-purple-950 text-purple-300">🛡️ Admin Hub</Link>
+                            <Link href="/?tab=admin" className="font-bold px-3.5 py-2 rounded-xl text-xs border border-purple-800 bg-purple-950 text-purple-300">🛡️ Admin Hub</Link>
                         )}
-                        <Link href="/" className={`font-semibold px-3.5 py-2 rounded-xl text-xs border ${isDark ? 'border-slate-700 bg-slate-800 text-slate-200' : 'border-slate-200 bg-slate-100 text-slate-700'}`}>📋 Front Desk</Link>
+                        {userRole === 'admin' && (
+                            <Link href="/?tab=frontdesk" className={`font-semibold px-3.5 py-2 rounded-xl text-xs border ${isDark ? 'border-slate-700 bg-slate-800 text-slate-200' : 'border-slate-200 bg-slate-100 text-slate-700'}`}>📋 Front Desk</Link>
+                        )}
                         <button onClick={() => setShowSettingsModal(true)} className={`font-semibold px-3.5 py-2 rounded-xl text-xs border cursor-pointer ${isDark ? 'border-slate-700 bg-slate-800 text-slate-200' : 'border-slate-200 bg-slate-100 text-slate-700'}`}>⚙️ Settings</button>
                         <button onClick={requestSignOut} className="font-bold px-3.5 py-2 rounded-xl text-xs border border-rose-900 bg-rose-950 text-rose-300 cursor-pointer">Sign Out</button>
                     </div>

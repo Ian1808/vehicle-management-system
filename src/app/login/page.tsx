@@ -74,13 +74,7 @@ export default function LoginPage() {
         showToast('Login successful! Redirecting...', 'success')
 
         setTimeout(() => {
-            if (userData.role === 'admin') {
-                window.location.href = '/admin'
-            } else if (userData.role === 'technician') {
-                window.location.href = '/technician'
-            } else {
-                window.location.href = '/'
-            }
+            window.location.href = '/'
         }, 1000)
     }
 
