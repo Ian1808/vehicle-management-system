@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { addWatermarkToFile } from '@/utils/watermark'
+import Link from 'next/link'
 
 type Vehicle = {
     id: string
@@ -110,8 +111,9 @@ export default function TechnicianPortal() {
                 .eq('id', user.id)
                 .single()
 
+            // PERMISSION UPDATE: Allow both 'technician' and 'admin' roles
             if (userError || !userData || (userData.role !== 'technician' && userData.role !== 'admin')) {
-                showToast('Access Denied: Restricted to workshop technicians.', 'error')
+                showToast('Access Denied: Restricted to workshop technicians and admins.', 'error')
                 setTimeout(() => { window.location.href = '/login' }, 1500)
                 return
             }
@@ -724,6 +726,12 @@ export default function TechnicianPortal() {
                         >
                             {isDark ? '☀️ Light' : '🌙 Dark'}
                         </button>
+                        <Link
+                            href="/admin"
+                            className={`font-bold px-3.5 py-2 rounded-xl text-xs border transition-all ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
+                        >
+                            &larr; Admin Hub
+                        </Link>
                         <button
                             onClick={() => setShowSettingsModal(true)}
                             className={`font-semibold px-3.5 py-2 rounded-xl text-xs border transition-all cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-slate-700' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}
