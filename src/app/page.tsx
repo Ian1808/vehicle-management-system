@@ -151,7 +151,7 @@ export default function FrontDeskDashboard() {
   }) {
     try {
       await insertVehicle({ ...data, created_by: currentUserId })
-      showToast('Vehicle successfully registered!', 'success')
+      showToast('Vehicle successfully registered with Paqar valuation!', 'success')
       setShowModal(false)
       const list = await fetchActiveVehicles()
       setVehicles(list)
@@ -359,8 +359,6 @@ export default function FrontDeskDashboard() {
     }
   }
 
-  const technicianPhotos = mediaItems.filter(m => m.media_type.startsWith('photo_'))
-
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
       {toast && <Toast message={toast.message} type={toast.type} />}
@@ -520,7 +518,7 @@ export default function FrontDeskDashboard() {
                   <p className="text-2xl font-black text-white mt-1">RM {selectedVehicle.intake_cost?.toLocaleString()}</p>
                 </div>
                 <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900">
-                  <p className="text-[11px] font-bold text-slate-400 uppercase">Market Value</p>
+                  <p className="text-[11px] font-bold text-slate-400 uppercase">Market Value (Paqar)</p>
                   <p className="text-2xl font-black text-white mt-1">RM {selectedVehicle.market_value?.toLocaleString()}</p>
                 </div>
                 <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900">
@@ -637,7 +635,13 @@ export default function FrontDeskDashboard() {
         )}
       </main>
 
-      <VehicleIntakeModal isOpen={showModal} onClose={() => setShowModal(false)} onSubmit={handleCreateVehicle} isDark={isDark} />
+      <VehicleIntakeModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        onSubmit={handleCreateVehicle}
+        isDark={isDark}
+        showToast={showToast}
+      />
     </div>
   )
 }

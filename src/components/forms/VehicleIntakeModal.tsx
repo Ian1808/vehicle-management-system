@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useJPJPlate } from '@/hooks/useJPJPlate'
-import { useVehicleCatalog } from '@/hooks/useVehicleCatalog'
+import { fetchPaqarVehicleByPlate } from '@/services/paqarService'
 
 type Props = {
     isOpen: boolean
@@ -16,46 +16,69 @@ type Props = {
         market_value: number
     }) => void
     isDark: boolean
+    showToast: (msg: string, type: 'success' | 'error') => void
 }
 
-export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark }: Props) {
+export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, showToast }: Props) {
     const { plate, error: plateError, handlePlateChange } = useJPJPlate()
-    const { makes, models, loading: catalogLoading, getModelsForMake } = useVehicleCatalog()
 
-    const [selectedMake, setSelectedMake] = useState('')
-    const [selectedModel, setSelectedModel] = useState('')
-    const [selectedYear, setSelectedYear] = useState('')
     const [chassis, setChassis] = useState('')
+    const [make, setMake] = useState('')
+    const [model, setModel] = useState('')
+    const [year, setYear] = useState('')
+    const [variant, setVariant] = useState('')
+    const [marketVal, setMarketVal] = useState('')
     const [insurancePanel, setInsurancePanel] = useState('')
     const [intakeCost, setIntakeCost] = useState('')
-    const [marketValue, setMarketValue] = useState('')
+    const [isQueryingPaqar, setIsQueryingPaqar] = useState(false)
 
     if (!isOpen) return null
 
-    function handleMakeChange(e: React.ChangeEvent<HTMLSelectElement>) {
-        const make = e.target.value
-        setSelectedMake(make)
-        getModelsForMake(make)
-        setSelectedModel('')
+    // Auto-fetch make, model, year, and market valuation from Paqar using the plate number
+    async function handlePlateBlur() {
+        if (!plate || plateError) return
+
+        setIsQueryingPaqar(true)
+        showToast('Querying Paqar.my for vehicle details...', 'success')
+
+        try {
+            const data = await fetchPaqarVehicleByPlate(plate)
+            if (data) {
+                if (data.make) setMake(data.make)
+                if (data.model) setModel(data.model)
+                if (data.year) setYear(String(data.year))
+                if (data.variant) setVariant(data.variant)
+                if (data.marketValue || data.valuation) {
+                    setMarketVal(String(data.marketValue || data.valuation))
+                }
+                showToast('Vehicle details auto-filled from Paqar.my!', 'success')
+            } else {
+                showToast('No exact match found on Paqar.my. Please enter details manually.', 'error')
+            }
+        } catch (err) {
+            showToast('Paqar lookup failed. Please enter details manually.', 'error')
+        } finally {
+            setIsQueryingPaqar(false)
+        }
     }
 
     function handleSubmit(e: React.FormEvent) {
         e.preventDefault()
         if (plateError || !plate) return
 
-        if (!selectedMake || !selectedModel || !selectedYear) {
-            alert('Please select Make, Model, and Year.')
+        if (!make || !model || !year) {
+            showToast('Please ensure Make, Model, and Year are filled.', 'error')
             return
         }
 
-        const makeModelYearStr = `${selectedMake} ${selectedModel} (${selectedYear})`
+        const makeModelYearStr = `${make} ${model} ${variant ? `(${variant})` : ''} - ${year}`.trim()
         onSubmit({
             plate_number: plate,
             chassis_number: chassis.toUpperCase(),
             make_model_year: makeModelYearStr,
             insurance_panel: insurancePanel,
             intake_cost: intakeCost ? parseFloat(intakeCost) : 0,
-            market_value: marketValue ? parseFloat(marketValue) : 0,
+            market_value: marketVal ? parseFloat(marketVal) : 0,
         })
     }
 
@@ -68,22 +91,27 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark }
                 <div className="flex justify-between items-center mb-6">
                     <div>
                         <h3 className={`text-xl font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>New Vehicle Intake</h3>
-                        <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Validated against JPJ Malaysia & Data.gov.my</p>
+                        <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Auto-fill make, model, year & valuation via Paqar.my</p>
                     </div>
                     <button onClick={onClose} className="rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg bg-slate-800 text-slate-400 hover:text-white cursor-pointer">&times;</button>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Plate Number *</label>
+                        <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400 flex items-center justify-between">
+                            <span>Plate Number *</span>
+                            {isQueryingPaqar && <span className="text-[10px] text-blue-400 animate-pulse">Querying Paqar.my...</span>}
+                        </label>
                         <input
                             type="text"
                             required
                             placeholder="e.g. WXY1234A or MADANI99"
                             value={plate}
                             onChange={(e) => handlePlateChange(e.target.value)}
+                            onBlur={handlePlateBlur}
                             className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${plateError ? 'border-rose-500 bg-rose-950/25 text-rose-300' : 'border-slate-800 bg-slate-950 text-white'}`}
                         />
+                        <p className="text-[10px] text-slate-400 mt-1">💡 Click outside plate input after typing to auto-fetch from Paqar.</p>
                         {plateError && <p className="text-[10px] font-bold text-rose-500 mt-1">⚠️ {plateError}</p>}
                     </div>
 
@@ -94,29 +122,27 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark }
 
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">
-                                Make * {catalogLoading && <span className="text-[9px] text-blue-400 animate-pulse">(Syncing...)</span>}
-                            </label>
-                            <select required disabled={catalogLoading || makes.length === 0} value={selectedMake} onChange={handleMakeChange} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-bold bg-slate-950 text-white cursor-pointer disabled:opacity-50">
-                                <option value="">-- Select Make --</option>
-                                {makes.map(m => <option key={m} value={m}>{m}</option>)}
-                            </select>
+                            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Make *</label>
+                            <input type="text" required placeholder="e.g. Perodua" value={make} onChange={(e) => setMake(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-medium bg-slate-950 text-white" />
                         </div>
                         <div>
                             <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Model *</label>
-                            <select required disabled={!selectedMake || models.length === 0} value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-bold bg-slate-950 text-white cursor-pointer disabled:opacity-50">
-                                <option value="">-- Select Model --</option>
-                                {models.map(md => <option key={md} value={md}>{md}</option>)}
-                            </select>
+                            <input type="text" required placeholder="e.g. Myvi" value={model} onChange={(e) => setModel(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-medium bg-slate-950 text-white" />
                         </div>
                     </div>
 
-                    <div>
-                        <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Mfg. Year *</label>
-                        <select required value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-bold bg-slate-950 text-white cursor-pointer">
-                            <option value="">-- Select Year --</option>
-                            {years.map(y => <option key={y} value={y}>{y}</option>)}
-                        </select>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Variant / Spec</label>
+                            <input type="text" placeholder="e.g. 1.5 AV" value={variant} onChange={(e) => setVariant(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-medium bg-slate-950 text-white" />
+                        </div>
+                        <div>
+                            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Mfg. Year *</label>
+                            <select required value={year} onChange={(e) => setYear(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-bold bg-slate-950 text-white cursor-pointer">
+                                <option value="">-- Select Year --</option>
+                                {years.map(y => <option key={y} value={y}>{y}</option>)}
+                            </select>
+                        </div>
                     </div>
 
                     <div>
@@ -130,8 +156,8 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark }
                             <input type="number" step="0.01" placeholder="0.00" value={intakeCost} onChange={(e) => setIntakeCost(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-medium bg-slate-950 text-white" />
                         </div>
                         <div>
-                            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Market Value (RM)</label>
-                            <input type="number" step="0.01" placeholder="0.00" value={marketValue} onChange={(e) => setMarketValue(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-medium bg-slate-950 text-white" />
+                            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Market Value (Paqar RM)</label>
+                            <input type="number" step="0.01" placeholder="0.00" value={marketVal} onChange={(e) => setMarketVal(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-medium bg-slate-950 text-white" />
                         </div>
                     </div>
 
