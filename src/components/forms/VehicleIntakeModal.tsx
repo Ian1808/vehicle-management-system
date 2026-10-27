@@ -41,7 +41,12 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark }
 
     function handleSubmit(e: React.FormEvent) {
         e.preventDefault()
-        if (plateError) return
+        if (plateError || !plate) return
+
+        if (!selectedMake || !selectedModel || !selectedYear) {
+            alert('Please select Make, Model, and Year.')
+            return
+        }
 
         const makeModelYearStr = `${selectedMake} ${selectedModel} (${selectedYear})`
         onSubmit({
@@ -89,15 +94,17 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark }
 
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Make *</label>
-                            <select required disabled={catalogLoading} value={selectedMake} onChange={handleMakeChange} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-bold bg-slate-950 text-white">
+                            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">
+                                Make * {catalogLoading && <span className="text-[9px] text-blue-400 animate-pulse">(Syncing...)</span>}
+                            </label>
+                            <select required disabled={catalogLoading || makes.length === 0} value={selectedMake} onChange={handleMakeChange} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-bold bg-slate-950 text-white cursor-pointer disabled:opacity-50">
                                 <option value="">-- Select Make --</option>
                                 {makes.map(m => <option key={m} value={m}>{m}</option>)}
                             </select>
                         </div>
                         <div>
                             <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Model *</label>
-                            <select required disabled={!selectedMake} value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-bold bg-slate-950 text-white">
+                            <select required disabled={!selectedMake || models.length === 0} value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-bold bg-slate-950 text-white cursor-pointer disabled:opacity-50">
                                 <option value="">-- Select Model --</option>
                                 {models.map(md => <option key={md} value={md}>{md}</option>)}
                             </select>
@@ -106,7 +113,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark }
 
                     <div>
                         <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Mfg. Year *</label>
-                        <select required value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-bold bg-slate-950 text-white">
+                        <select required value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} className="w-full border border-slate-800 rounded-xl p-3 text-xs font-bold bg-slate-950 text-white cursor-pointer">
                             <option value="">-- Select Year --</option>
                             {years.map(y => <option key={y} value={y}>{y}</option>)}
                         </select>
@@ -129,8 +136,8 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark }
                     </div>
 
                     <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
-                        <button type="button" onClick={onClose} className="px-5 py-2.5 rounded-xl text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer">Cancel</button>
-                        <button type="submit" disabled={!!plateError} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer disabled:opacity-50">Save Intake</button>
+                        <button type="button" onClick={onClose} className="px-5 py-2.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer">Cancel</button>
+                        <button type="submit" disabled={!!plateError} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Save Intake</button>
                     </div>
                 </form>
             </div>
