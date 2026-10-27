@@ -55,75 +55,6 @@ const PHOTO_CATEGORIES = [
   { key: 'chassis_number', label: 'Chassis Number (VIN)' },
 ]
 
-// ------------------------------------------------------------------
-// 1. STRICT JPJ MALAYSIA NUMBER PLATE VALIDATOR
-// ------------------------------------------------------------------
-function formatAndValidateJPJPlate(input: string): { formatted: string; isValid: boolean; error?: string } {
-  const cleaned = input.toUpperCase().trim().replace(/[^A-Z0-9]/g, '')
-
-  if (!cleaned) {
-    return { formatted: '', isValid: false, error: 'Plate number cannot be empty.' }
-  }
-
-  // Standard (e.g., WXY1234A) and Special Word Series (e.g., MADANI1, 1MALAYSIA99)
-  const standardPattern = /^[A-Z]{1,3}[0-9]{1,4}[A-Z]{0,2}$/
-  const specialWordPattern = /^(MADANI|MALAYSIA|1MALAYSIA|PUTRAJAYA|LANGKAWI|SUKOM|BAMBEE|PATRIOT|G1M|A1M|VIP|GOLD|PERFECT|RIMAU|SMS|US|XX|YY|ZZ|FF|BHP)[0-9]{1,4}$/
-
-  if (standardPattern.test(cleaned) || specialWordPattern.test(cleaned)) {
-    return { formatted: cleaned, isValid: true }
-  }
-
-  return {
-    formatted: cleaned,
-    isValid: false,
-    error: 'Invalid JPJ format. Examples: WXY1234A, V1234, MADANI123'
-  }
-}
-
-// ------------------------------------------------------------------
-// 2. DATA.GOV.MY REAL-TIME CATALOG HOOK
-// ------------------------------------------------------------------
-function useVehicleCatalog() {
-  const [makes, setMakes] = useState<string[]>([])
-  const [models, setModels] = useState<string[]>([])
-  const [allVehicles, setAllVehicles] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    async function fetchJpjData() {
-      try {
-        const res = await fetch('https://api.data.gov.my/data-catalogue?id=registration_transactions_car&limit=10000')
-        const data = await res.json()
-
-        if (data && data.length > 0) {
-          setAllVehicles(data)
-          // Extract unique makers, exclude empty or invalid ones
-          const uniqueMakes = Array.from(new Set(data.map((v: any) => v.maker)))
-            .filter(Boolean)
-            .sort() as string[]
-          setMakes(uniqueMakes)
-        }
-      } catch (error) {
-        console.error("Failed to fetch JPJ data from data.gov.my", error)
-      } finally {
-        setLoading(false)
-      }
-    }
-    fetchJpjData()
-  }, [])
-
-  const getModelsForMake = (selectedMake: string) => {
-    const filtered = allVehicles.filter(v => v.maker === selectedMake)
-    const uniqueModels = Array.from(new Set(filtered.map(v => v.model)))
-      .filter(Boolean)
-      .sort() as string[]
-    setModels(uniqueModels)
-  }
-
-  return { makes, models, loading, getModelsForMake }
-}
-
-
 export default function FrontDeskDashboard() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
@@ -156,17 +87,11 @@ export default function FrontDeskDashboard() {
 
   // New Intake Form State
   const [plate, setPlate] = useState('')
-  const [plateError, setPlateError] = useState('')
   const [chassis, setChassis] = useState('')
+  const [makeModel, setMakeModel] = useState('')
   const [insurancePanel, setInsurancePanel] = useState('')
   const [intakeCost, setIntakeCost] = useState('')
   const [marketValue, setMarketValue] = useState('')
-
-  // Real-time Vehicle Catalog State for Intake Form
-  const { makes, models, loading: catalogLoading, getModelsForMake } = useVehicleCatalog()
-  const [selectedMake, setSelectedMake] = useState('')
-  const [selectedModel, setSelectedModel] = useState('')
-  const [selectedYear, setSelectedYear] = useState('')
 
   const supabase = createClient()
 
@@ -306,51 +231,24 @@ export default function FrontDeskDashboard() {
     }
   }
 
-  // --- Handlers for New Intake Form with JPJ + Realtime DB ---
-  function handlePlateInput(e: React.ChangeEvent<HTMLInputElement>) {
-    const result = formatAndValidateJPJPlate(e.target.value)
-    setPlate(result.formatted)
-    setPlateError(result.error || '')
-  }
-
-  function handleMakeSelection(e: React.ChangeEvent<HTMLSelectElement>) {
-    const make = e.target.value
-    setSelectedMake(make)
-    getModelsForMake(make)
-    setSelectedModel('')
-  }
-
   function handleCreateVehicleSubmit(e: React.FormEvent) {
     e.preventDefault()
-
-    if (plateError) {
-      showToast('Please fix the plate number format before submitting.', 'error')
-      return
-    }
-
-    if (!selectedMake || !selectedModel || !selectedYear) {
-      showToast('Please select the complete Make, Model, and Year.', 'error')
-      return
-    }
-
-    const makeModelYearStr = `${selectedMake} ${selectedModel} (${selectedYear})`
-
     setConfirmModal({
       title: 'Confirm Vehicle Intake',
-      message: `Are you sure you want to register vehicle ${plate} (${makeModelYearStr}) into the active registry?`,
+      message: `Are you sure you want to register vehicle ${plate.toUpperCase()} (${makeModel}) into the active registry?`,
       confirmText: 'Register Vehicle',
       confirmVariant: 'success',
-      onConfirm: () => executeCreateVehicle(makeModelYearStr),
+      onConfirm: () => executeCreateVehicle(),
     })
   }
 
-  async function executeCreateVehicle(makeModelYearStr: string) {
+  async function executeCreateVehicle() {
     setConfirmModal(null)
     const { error } = await supabase.from('vehicles').insert([
       {
         plate_number: plate,
-        chassis_number: chassis.toUpperCase(),
-        make_model_year: makeModelYearStr,
+        chassis_number: chassis,
+        make_model_year: makeModel,
         insurance_panel: insurancePanel,
         status: 'intake',
         intake_cost: intakeCost ? parseFloat(intakeCost) : 0,
@@ -364,11 +262,8 @@ export default function FrontDeskDashboard() {
     } else {
       showToast('Vehicle successfully added to registry!', 'success')
       setPlate('')
-      setPlateError('')
       setChassis('')
-      setSelectedMake('')
-      setSelectedModel('')
-      setSelectedYear('')
+      setMakeModel('')
       setInsurancePanel('')
       setIntakeCost('')
       setMarketValue('')
@@ -534,10 +429,6 @@ export default function FrontDeskDashboard() {
   const additionalPhotos = mediaItems.filter(m => m.media_type === 'photo_additional')
 
   const isDark = theme === 'dark'
-
-  // Generate Year Options (e.g. 1990 to current year)
-  const currentYear = new Date().getFullYear()
-  const years = Array.from(new Array(40), (val, index) => currentYear - index)
 
   return (
     <div className={`min-h-screen relative selection:bg-blue-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
@@ -1096,84 +987,24 @@ export default function FrontDeskDashboard() {
             <div className="flex justify-between items-center mb-6">
               <div>
                 <h3 className={`text-xl font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>New Vehicle Intake</h3>
-                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>All vehicle data is validated against JPJ Malaysia standards.</p>
+                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Enter vehicle details to register into the system.</p>
               </div>
               <button onClick={() => setShowModal(false)} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}>&times;</button>
             </div>
 
             <form onSubmit={handleCreateVehicleSubmit} className="space-y-4">
-              {/* JPJ PLATE NUMBER */}
               <div>
                 <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Plate Number *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. WXY1234A or MADANI99"
-                  value={plate}
-                  onChange={handlePlateInput}
-                  className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all ${plateError
-                      ? 'border-rose-500 focus:ring-2 focus:ring-rose-500 bg-rose-950/20 text-rose-400'
-                      : isDark
-                        ? 'bg-slate-950 border-slate-800 text-white focus:ring-2 focus:ring-blue-500'
-                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:ring-2 focus:ring-blue-500'
-                    }`}
-                />
-                {plateError && <p className="text-[10px] font-bold text-rose-500 mt-1.5">⚠️ {plateError}</p>}
+                <input type="text" required placeholder="e.g. WXY 1234" value={plate} onChange={(e) => setPlate(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`} />
               </div>
-
               <div>
                 <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Chassis Number (VIN) *</label>
-                <input type="text" required placeholder="e.g. PMAL123456789" value={chassis} onChange={(e) => setChassis(e.target.value.toUpperCase())} className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none uppercase ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`} />
+                <input type="text" required placeholder="e.g. PMAL123456789" value={chassis} onChange={(e) => setChassis(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`} />
               </div>
-
-              {/* LIVE VEHICLE CATALOG (DATA.GOV.MY) */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Make * {catalogLoading && <span className="text-[9px] text-blue-400 animate-pulse">(Syncing...)</span>}
-                  </label>
-                  <select
-                    required
-                    disabled={catalogLoading || makes.length === 0}
-                    value={selectedMake}
-                    onChange={handleMakeSelection}
-                    className={`w-full border rounded-xl p-3 text-xs font-bold focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer disabled:opacity-50 ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
-                  >
-                    <option value="">-- Select Make --</option>
-                    {makes.map((make) => <option key={make} value={make}>{make}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Model *</label>
-                  <select
-                    required
-                    disabled={!selectedMake || models.length === 0}
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    className={`w-full border rounded-xl p-3 text-xs font-bold focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer disabled:opacity-50 ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
-                  >
-                    <option value="">-- Select Model --</option>
-                    {models.map((model) => <option key={model} value={model}>{model}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              {/* YEAR */}
               <div>
-                <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Mfg. Year *</label>
-                <select
-                  required
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(e.target.value)}
-                  className={`w-full border rounded-xl p-3 text-xs font-bold focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
-                >
-                  <option value="">-- Select Year --</option>
-                  {years.map((y) => <option key={y} value={y}>{y}</option>)}
-                </select>
+                <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Make, Model & Year *</label>
+                <input type="text" required placeholder="e.g. Honda Civic 2021" value={makeModel} onChange={(e) => setMakeModel(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`} />
               </div>
-
-
               <div>
                 <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Insurance Panel</label>
                 <input type="text" placeholder="e.g. Allianz General" value={insurancePanel} onChange={(e) => setInsurancePanel(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`} />
@@ -1190,12 +1021,7 @@ export default function FrontDeskDashboard() {
               </div>
               <div className={`flex justify-end gap-3 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                 <button type="button" onClick={() => setShowModal(false)} className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${isDark ? 'text-slate-300 bg-slate-800 hover:bg-slate-700 border-slate-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200'}`}>Cancel</button>
-                <button
-                  type="submit"
-                  disabled={!!plateError}
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
-                  Save Intake
-                </button>
+                <button type="submit" className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer">Save Intake</button>
               </div>
             </form>
           </div>
