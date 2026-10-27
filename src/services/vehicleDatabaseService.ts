@@ -1,73 +1,191 @@
-// Comprehensive Vehicle Database Service (Inspired by MeterApp/vehicle-db)
-// Provides complete Make, Model, Year, and Variant data for Malaysian and global vehicles.
+// Comprehensive Vehicle Database Service powered by Malaysia JPJ Car Registration Transactions
+// Provides complete Make, Model, and Year data from official JPJ records (2015-2026).
 
 export const VEHICLE_DATABASE: Record<string, { models: string[]; years: number[]; variants: Record<string, string[]> }> = {
-    PERODUA: {
-        models: ['Myvi', 'Bezza', 'Axia', 'Ativa', 'Alza', 'Aruz', 'Kancil', 'Kelisa', 'Viva', 'Naza'],
-        years: [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015, 2014, 2013, 2012],
-        variants: {
-            Myvi: ['1.3 G (Std)', '1.3 X', '1.5 H', '1.5 AV (Advance)', '1.3 Standard', '1.5 Premium'],
-            Bezza: ['1.0 G (Manual)', '1.0 G (Auto)', '1.3 X', '1.3 AV'],
-            Axia: ['1.0 E', '1.0 G', '1.0 X', '1.0 SE', '1.0 AV', 'New Axia G', 'New Axia X', 'New Axia SE', 'New Axia AV'],
-            Ativa: ['1.0X', '1.0H', '1.0AV'],
-            Alza: ['1.5 X', '1.5 H', '1.5 AV'],
-            Aruz: ['1.5 X', '1.5 AV'],
-        }
+    "ABARTH": {
+        "models": ["ABARTH 595 TURISMO"],
+        "years": [2026],
+        "variants": {}
     },
-    PROTON: {
-        models: ['Saga', 'Persona', 'Iriz', 'X50', 'X70', 'X90', 'Exura', 'Wira', 'Waja', 'Perdana', 'S70'],
-        years: [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015, 2014],
-        variants: {
-            Saga: ['1.3 Standard (MT)', '1.3 Standard (AT)', '1.3 Premium', '1.3 Premium S'],
-            Persona: ['1.6 Standard', '1.6 Executive', '1.6 Premium'],
-            Iriz: ['1.3 Standard', '1.6 Executive', '1.6 Premium'],
-            X50: ['1.5T Standard', '1.5T Executive', '1.5T Premium', '1.5 TGDi Flagship'],
-            X70: ['1.5 Standard', '1.5 Executive', '1.5 Premium', '1.5 Flagship', '1.8 TGDi Premium'],
-            X90: ['1.5 Standard', '1.5 Executive', '1.5 Premium', '1.5 Flagship'],
-            S70: ['1.5 Executive', '1.5 Premium', '1.5 Flagship', '1.5 Flagship X']
-        }
+    "ACURA": {
+        "models": ["MDX"],
+        "years": [2025],
+        "variants": {}
     },
-    TOYOTA: {
-        models: ['Vios', 'Yaris', 'Corolla', 'Camry', 'Hilux', 'Fortuner', 'Corolla Cross', 'Innova', 'Alphard', 'Vellfire', 'RAV4', 'Rush'],
-        years: [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
-        variants: {
-            Vios: ['1.5 E', '1.5 G', '1.5 S', '1.5 TRD Sportivo'],
-            Yaris: ['1.5 E', '1.5 G', '1.5 GR-S'],
-            Hilux: ['2.4 Single Cab', '2.4 Double Cab E', '2.4 Double Cab G', '2.4 Double Cab V', '2.8 Rogue'],
-            'Corolla Cross': ['1.8 G', '1.8 V', '1.8 HEV Hybrid']
-        }
+    "AK SPORTSCAR": {
+        "models": ["AK 427"],
+        "years": [2023],
+        "variants": {}
     },
-    HONDA: {
-        models: ['City', 'Civic', 'Accord', 'HR-V', 'CR-V', 'BR-V', 'Jazz', 'WR-V'],
-        years: [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016],
-        variants: {
-            City: ['1.5 S', '1.5 E', '1.5 V', '1.5 RS e:HEV'],
-            Civic: ['1.5 E', '1.5 V', '1.5 RS', '2.0 e:HEV RS'],
-            'HR-V': ['1.5 S', '1.5 E', '1.5 V', '1.5 Turbo RS', '1.5 e:HEV Hybrid'],
-            'CR-V': ['1.5 S', '1.5 E', '1.5 V 2WD', '1.5 TC-P 4WD', '2.0 e:HEV RS']
-        }
+    "ALFA ROMEO": {
+        "models": ["147", "159", "1750 SPIDER", "2000", "2000 SPIDER", "4C", "ALFETTA", "GIULIA", "GIULIETTA", "GT", "GTV", "MITO", "MONTREAL", "SPIDER", "STELVIO"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
     },
-    MAZDA: {
-        models: ['Mazda 2', 'Mazda 3', 'Mazda 6', 'CX-3', 'CX-30', 'CX-5', 'CX-8', 'CX-9'],
-        years: [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018],
-        variants: {
-            'CX-5': ['2.0 Mid', '2.0 High', '2.5 High', '2.2D High', '2.5 Turbo']
-        }
+    "ALPINE": {
+        "models": ["A110"],
+        "years": [2023, 2022, 2020],
+        "variants": {}
     },
-    NISSAN: {
-        models: ['Almera', 'Navara', 'X-Trail', 'Serena'],
-        years: [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018],
-        variants: {
-            Almera: ['1.0 Turbo VL', '1.0 Turbo VLT', '1.0 Turbo Executive']
-        }
+    "ASTON MARTIN": {
+        "models": ["CYGNET", "DB11", "DB12", "DB6", "DB7", "DB9", "DBS", "DBX", "LAGONDA", "RAPIDE", "VALOUR", "VANQUISH", "VANTAGE"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
     },
-    BMW: { models: ['3 Series', '5 Series', '7 Series', 'X1', 'X3', 'X5', 'X7', 'i4', 'iX'], years: [2026, 2025, 2024, 2023, 2022, 2021, 2020], variants: {} },
-    MERCEDES_BENZ: { models: ['A-Class', 'C-Class', 'E-Class', 'S-Class', 'GLA', 'GLB', 'GLC', 'GLE'], years: [2026, 2025, 2024, 2023, 2022, 2021, 2020], variants: {} },
-    BYD: { models: ['Atto 3', 'Seal', 'Dolphin'], years: [2026, 2025, 2024, 2023], variants: {} }
+    "AUDI": {
+        "models": ["A1", "A3", "A3 SEDAN", "A4", "A4 AVANT", "A5", "A5 SPORTBACK", "A6", "A7", "A7 SPORTBACK", "A8", "E-TRON", "Q2", "Q3", "Q4", "Q5", "Q7", "Q8", "QUATTRO", "R8", "R8 SPYDER", "RS E-TRON GT", "RS Q3", "RS Q8", "RS3", "RS4", "RS4 AVANT", "RS5", "RS5 SPORTBACK", "RS6", "RS7", "S3", "S4", "S5", "S5 SPORTBACK", "S6", "S7", "S8", "SQ5", "SQ8", "TT", "TT RS", "TT S"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "BENTLEY": {
+        "models": ["ARNAGE", "AZURE", "BENTAYGA", "CONTINENTAL FLYING SPUR", "CONTINENTAL GT", "MARK VI", "MULSANNE", "R TYPE", "S1", "S3", "T-SERIES", "TURBO"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "BMW": {
+        "models": ["1 SERIES", "2 SERIES", "3 SERIES", "3.0 CSL", "4 SERIES", "5 SERIES", "6 SERIES", "7 SERIES", "8 SERIES", "ALPINA B3", "CLUBMAN", "COOPER", "COUNTRYMAN", "I3", "I4", "I5", "I7", "I8", "ISETTA", "IX", "IX1", "IX2", "IX3", "JOHN COOPER WORKS", "X1", "X2", "X3", "X4", "X5", "X6", "X7", "XM", "Z3", "Z4"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "BYD": {
+        "models": ["ATTO 2", "ATTO 3", "DOLPHIN", "E6", "M6", "SEAL", "SEAL 6", "SEALION"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2019],
+        "variants": {}
+    },
+    "CHERY": {
+        "models": ["A200", "B14", "EASTAR", "ICAR V23", "ICAUR 03", "JAECOO J5", "JAECOO J6", "JAECOO J7", "JAECOO J8", "OMODA 5", "OMODA 7", "OMODA 9", "Q22", "T11", "TIGGO 3", "TIGGO 7", "TIGGO 7 PRO", "TIGGO 8", "TIGGO 8 PRO", "TIGGO 9", "TIGGO CROSS", "TRANSCOM"],
+        "years": [2026, 2025, 2024, 2023, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "FERRARI": {
+        "models": ["12CILINDRI", "246", "296", "308", "360", "458", "488", "488 PISTA SPIDER", "599", "812", "CALIFORNIA", "F12", "F355", "F360", "F430", "F599", "F8", "FF", "GTC4LUSSO", "LAFERRARI", "MONDIAL", "PORTOFINO", "PUROSANGUE", "ROMA", "SF90", "SP2", "TESTAROSSA"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "FIAT": {
+        "models": ["124 SPIDER", "500", "ABARTH", "ABARTH 124", "ABARTH 500", "ABARTH 595", "ABARTH 595 COMPETIZIONE", "ABARTH 595 TURISMO", "ABARTH 695", "BARCHETTA", "MULTIPLA", "PUNTO", "ULYSSE"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "FORD": {
+        "models": ["350", "AC COBRA", "CORTINA", "COURIER", "ECOSPORT", "ESCAPE", "EVEREST", "EXPEDITION", "F-SERIES", "FIESTA", "FOCUS", "GALAXY", "GT", "KUGA", "LASER", "MACH-E", "MODEL A", "MODEL T", "MONDEO", "MUSTANG", "RANGER", "S-MAX", "THUNDERBIRD", "TRANSIT"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "HONDA": {
+        "models": ["ACCORD", "ACTY", "ACURA", "AIRWAVE", "BR-V", "CITY", "CIVIC", "CIVIC HATCHBACK", "CR-V", "CR-X", "CR-Z", "CROSSROAD", "E ADVANCE", "E:N1", "EDIX", "ELYSION", "FIT", "FR-V", "FREED", "HR-V", "INSIGHT", "INSPIRE", "INTEGRA", "JADE", "JAZZ", "LEGEND", "LOGO", "MDX", "MOBILIO", "N-BOX", "N-ONE", "N-VAN", "NSX", "ODYSSEY", "PILOT", "PRELUDE", "S2000", "S660", "S800", "SHUTTLE", "SPADA", "STEPWGN", "STREAM", "VEZEL", "WR-V", "ZR-V"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "HYUNDAI": {
+        "models": ["ACCENT", "AVANTE", "COUPE", "CRETA", "ELANTRA", "EON ERA", "EXCEL", "GENESIS", "GENESIS G80", "GENESIS G90", "GENESIS GV80", "GETZ", "GRAND STAREX", "H-1", "I20", "I30", "I40", "I800", "IONIQ", "IONIQ 5", "IONIQ 6", "IONIQ 9", "IX35", "KONA", "MATRIX", "NEXO", "PALISADE", "SANTA FE", "SONATA", "STARGAZER", "STARIA", "TRAJET", "TUCSON", "TUSCANI", "VELOSTER"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "KIA": {
+        "models": ["CARENS", "CARNIVAL", "CERATO", "EV6", "EV9", "K900", "KM410", "KOUP", "MAGENTIS", "NIRO", "OPTIMA", "PICANTO", "PREGIO", "RIO", "SELTOS", "SORENTO", "SOUL", "SPORTAGE", "STINGER"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "LAMBORGHINI": {
+        "models": ["AVENTADOR", "DIABLO", "GALLARDO", "HURACAN", "JALPA", "MURCIELAGO", "REVUELTO", "TEMERARIO", "URUS"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "LAND ROVER": {
+        "models": ["DEFENDER", "DISCOVERY", "FREELANDER", "LAND CRUISER", "RANGE ROVER", "RANGE ROVER EVOQUE", "RANGE ROVER SPORT", "RANGE ROVER SV SERENITY", "RANGE ROVER VELAR", "RANGE ROVER VOGUE", "SERIES III"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "LEXUS": {
+        "models": ["CT", "ES", "GS", "GX", "IS", "LBX", "LC", "LM", "LS", "LX", "NX", "NX200T", "RC", "RX", "RZ", "SC", "UX", "ZX"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "MASERATI": {
+        "models": ["COUPE", "GHIBLI", "GRANCABRIO", "GRANSPORT", "GRANTURISMO", "GRECALE", "LEVANTE", "MC20", "QUATTROPORTE"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "MAZDA": {
+        "models": ["2", "3", "323", "5", "6", "8", "ASTINA", "ATENZA", "AXELA", "BIANTE", "BT-50", "COSMO", "CX-3", "CX-30", "CX-5", "CX-60", "CX-7", "CX-8", "CX-9", "DEMIO", "E1400", "FAMILIA", "FIGHTER", "LANTIS", "MPV", "MX-30", "MX-5", "MX-6", "PREMACY", "RX-7", "RX-8", "TRIBUTE"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "MCLAREN": {
+        "models": ["540C", "570GT", "570S", "600LT", "650S", "675LT", "720S", "750S", "765LT", "ARTURA", "GT", "MP4", "P1", "SENNA", "SPORTS"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "MERCEDES BENZ": {
+        "models": ["420 SEC", "500 SEC", "A-CLASS", "AMG GT", "B-CLASS", "C-CLASS", "CL-CLASS", "CLA", "CLE", "CLK", "CLS", "E-CLASS", "EQA", "EQB", "EQC", "EQE", "EQS", "EQV", "F-CLASS", "G-CLASS", "GL-CLASS", "GLA", "GLB", "GLC", "GLC-CLASS", "GLE", "GLS", "GT", "GT AMG", "M-CLASS", "MAYBACH S-CLASS", "MB100", "MB140", "R-CLASS", "S-CLASS", "SL-CLASS", "SLC", "SLK", "SLS", "SPRINTER", "V-CLASS", "VITO", "X-CLASS"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "MINI": {
+        "models": ["ACEMAN", "CLUBMAN", "CONVERTIBLE", "COOPER", "COUNTRYMAN", "JOHN COOPER WORKS", "ONE", "PACEMAN", "ROADSTER", "VICTORIA"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "MITSUBISHI": {
+        "models": ["AIRTREK", "ASX", "ATTRAGE", "CHARIOT", "COLT", "DELICA", "DELICA MINI", "ECLIPSE", "EK CROSS", "FTO", "GALANT", "GRANDIS", "GTO", "LANCER", "MAGNA", "MINICA", "MIRAGE", "OUTLANDER", "PAJERO", "RVR", "SHOGUN", "SPACE", "TRITON", "XFORCE", "XPANDER"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "NISSAN": {
+        "models": ["180SX", "350Z", "370Z", "AD", "AD RESORT", "ALMERA", "BE-1", "BLUEBIRD", "CEDRIC", "CEFIRO", "CIMA", "CUBE", "DUALIS", "ELGRAND", "FAIRLADY", "FAIRLADY Z", "FIGARO", "FRONTIER", "GRAND LIVINA", "GT-R", "JUKE", "KICKS", "LAFESTA", "LATIO", "LAUREL", "LEAF", "LIBERTY", "LIVINA", "MARCH", "MAXIMA", "MOCO", "MURANO", "NAVARA", "NOTE", "NV200", "PAO", "PRAIRIE", "PRESAGE", "PRESEA", "PRIMERA", "PULSAR", "QASHQAI", "ROGUE", "ROOX", "SAKURA", "SENTRA", "SERENA", "SILVIA", "SK22", "SK82", "SKYLINE", "SKYLINE GT-R", "STAGEA", "SUNNY", "SYLPHY", "TEANA", "TERRA", "TIIDA", "TILDA", "URVAN", "X-TRAIL"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "PERODUA": {
+        "models": ["ALZA", "ARUZ", "ATIVA", "AXIA", "BEZZA", "KELISA", "KENARI", "MYVI", "QV-E", "RUSA", "TRAZ", "VIVA"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "PORSCHE": {
+        "models": ["356", "718 BOXSTER", "718 CAYMAN", "718 SPYDER", "911", "911 CARRERA", "911 DAKAR", "911 GT2RS", "911 GT3", "911 TARGA", "911 TURBO", "912", "918 SPYDER", "928", "930", "944", "968", "BOXSTER", "CAYENNE", "CAYMAN", "MACAN", "PANAMERA", "TAYCAN"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "PROTON": {
+        "models": ["E.MAS 5", "E.MAS 7", "ERTIGA", "EXORA", "INSPIRA", "IRIZ", "ISWARA", "PERDANA", "PERSONA", "PREVE", "S70", "SAGA", "SATRIA", "SATRIA NEO", "SAVVY", "SUPRIMA S", "WAJA", "WIRA", "X50", "X70", "X90"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "SUBARU": {
+        "models": ["ASCENT", "BRZ", "CROSSTREK", "EXIGA", "FORESTER", "IMPREZA", "LEGACY", "LEVORG", "OUTBACK", "R1", "REX", "TRIBECA", "WRX", "XV"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "SUZUKI": {
+        "models": ["ALTO", "ALTO WORKS", "APV", "CAPPUCINO", "CARRY", "E VITARA", "ERV", "FRONX", "GRAND VITARA", "HUSTLER", "IGNIS", "JIMNY", "JIMNY NOMADE", "JIMNY SIERRA", "KEI", "KIZASHI", "M13", "SOLIO", "SPACIA", "SPLASH", "SWIFT", "SX4", "VITARA", "XBEE"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "TESLA": {
+        "models": ["MODEL 3", "MODEL P", "MODEL S", "MODEL X", "MODEL Y"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "TOYOTA": {
+        "models": ["4RUNNER", "86", "AE86", "ALLION", "ALPHARD", "ALTEZZA", "AQUA", "ARISTO", "AURION", "AVANZA", "AVENSIS", "BB", "BLADE", "BZ4X", "C-HR", "CALDINA", "CAMRY", "CARINA", "CASERTA", "CELICA", "CELSIOR", "CENTURY", "CHASER", "COASTER", "COPEN", "COROLLA", "COROLLA ALTIS", "COROLLA CROSS", "COROLLA LEVIN", "COROLLA SPACIO", "COROLLA VERSO", "COROLLA WAGON", "CORONA", "COUPE", "CROWN", "CROWN MAJESTA", "ESQUIRE", "ESTIMA", "ETIOS", "FJ CRUISER", "FORTUNER", "FUN CARGO", "GAIA", "GR86", "GRANACE", "GRMN YARIS", "HARRIER", "HIACE", "HIGHLANDER", "HILUX", "INNOVA", "INNOVA ZENIX", "IPSUM", "IQ", "ISIS", "IST", "KIJANG", "KLUGER", "LAND CRUISER", "LAND CRUISER PRADO", "LX", "MAJESTY", "MARK II", "MARK X", "MEGA CRUISER", "MIRAI", "MR2", "MRS", "NADIA", "NOAH", "NX", "ODYSSEY", "PASSO", "PICNIC", "PORTE", "PREMIO", "PREVIA", "PRIUS", "PROGRÈS", "RACTIS", "RAIZE", "RAUM", "RAV4", "REGIUSACE", "ROOMY", "RUSH", "RX", "RX350", "SAHARA", "SAI", "SEQUOIA", "SIENNA", "SIENTA", "SOARER", "SOLUNA", "SPADE", "SPRINTER", "SPRINTER TRUENO", "STARLET", "SUPRA", "TACOMA", "TANK", "TARAGO", "TOWNACE", "TUNDRA", "URBAN CRUISER", "VANGUARD", "VELLFIRE", "VELOZ", "VEROSSA", "VIOS", "VITZ", "VOLTZ", "VOXY", "WALD", "WINDOM", "WISH", "YARIS", "YARIS CROSS"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "VOLKSWAGEN": {
+        "models": ["AMAROK", "ARTEON", "ATLAS", "BEETLE", "CARAVELLE", "CC", "DELUXE MICROBUS", "EOS", "GOLF", "ID.3", "ID.4", "ID.5", "ID.BUZZ", "JETTA", "KARMANN GHIA", "KOMBI", "NEW BEETLE", "PASSAT", "PHAETON", "POLO", "SAFARI", "SCIROCCO", "SHARAN", "T-CROSS", "T-ROC", "T2 CAMPER", "T2 KOMBI", "TAYRON", "TIGUAN", "TOUAREG", "TOURAN", "TRANSPORTER", "TYPE 2", "TYPE 4", "UP", "VENTO", "VOKARO"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    },
+    "VOLVO": {
+        "models": ["262", "740", "900", "C30", "C40", "C70", "EC40", "ES90", "EX30", "EX90", "P1800", "S40", "S60", "S80", "S90", "V40", "V50", "V60", "V70", "V90", "XC40", "XC60", "XC70", "XC90"],
+        "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+        "variants": {}
+    }
 }
 
 export function getVehicleMakes() {
-    return Object.keys(VEHICLE_DATABASE)
+    return Object.keys(VEHICLE_DATABASE).sort()
 }
 
 export function getModelsForMake(make: string) {
@@ -76,7 +194,7 @@ export function getModelsForMake(make: string) {
 
 export function getYearsForVehicle() {
     const baseYear = 2026
-    return Array.from(new Array(30), (_, i) => baseYear - i)
+    return Array.from(new Array(15), (_, i) => baseYear - i)
 }
 
 export function getVariantsForModel(make: string, model: string) {
