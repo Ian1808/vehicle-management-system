@@ -5,9 +5,18 @@ import { createClient } from '@/utils/supabase/client'
 import Link from 'next/link'
 import { addWatermarkToFile } from '@/utils/watermark'
 import { useTheme } from '@/lib/theme'
+import { PHOTO_CATEGORIES } from '@/lib/photoCategories'
+import { uniqueFileSuffix } from '@/lib/uploadUtils'
 import Toast from '@/components/ui/Toast'
 import ConfirmModal from '@/components/ui/ConfirmModal'
 import PreviewModal from '@/components/ui/PreviewModal'
+import AccountSettingsModal, { type AccountSettingsPayload } from '@/components/ui/AccountSettingsModal'
+import Card from '@/components/ui/Card'
+import StatusBadge from '@/components/ui/StatusBadge'
+import SectionHeading from '@/components/ui/SectionHeading'
+import EmptyState from '@/components/ui/EmptyState'
+import ResponsiveTable from '@/components/ui/ResponsiveTable'
+import PhotoEvidenceCell from '@/components/technician/PhotoEvidenceCell'
 
 type Vehicle = {
     id: string
@@ -36,17 +45,6 @@ type ConfirmState = {
 } | null
 type PreviewState = { url: string; title: string } | null
 
-const PHOTO_CATEGORIES = [
-    { key: 'front', label: 'Front View' },
-    { key: 'back', label: 'Back View' },
-    { key: 'left', label: 'Left Side' },
-    { key: 'right', label: 'Right Side' },
-    { key: 'windshield', label: 'Front Windshield' },
-    { key: 'meter_gauge', label: 'Meter Gauge' },
-    { key: 'engine_bay', label: 'Engine Bay' },
-    { key: 'chassis_number', label: 'Chassis Number (VIN)' },
-]
-
 export default function TechnicianPortal() {
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
@@ -72,12 +70,6 @@ export default function TechnicianPortal() {
     const [currentUserEmail, setCurrentUserEmail] = useState('')
     const [settingsFullName, setSettingsFullName] = useState('')
     const [settingsUsername, setSettingsUsername] = useState('')
-    const [oldPassword, setOldPassword] = useState('')
-    const [newPassword, setNewPassword] = useState('')
-    const [confirmNewPassword, setConfirmNewPassword] = useState('')
-    const [showOldPassword, setShowOldPassword] = useState(false)
-    const [showNewPassword, setShowNewPassword] = useState(false)
-    const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
     const supabase = createClient()
 
@@ -142,45 +134,32 @@ export default function TechnicianPortal() {
         loadMedia()
     }, [selectedVehicle?.id])
 
-    async function handleUpdateSettings(e: React.FormEvent) {
-        e.preventDefault()
-        if (!currentUserId) return
-
+    async function handleSettingsSave(payload: AccountSettingsPayload): Promise<{ ok: boolean; error?: string }> {
+        if (!currentUserId) return { ok: false, error: 'Not authenticated.' }
         try {
-            await supabase.from('users').update({ full_name: settingsFullName }).eq('id', currentUserId)
+            await supabase.from('users').update({ full_name: payload.fullName }).eq('id', currentUserId)
 
-            if (newPassword.trim()) {
-                if (!oldPassword.trim()) {
-                    showToast('Please enter your current password.', 'error')
-                    return
-                }
-                if (newPassword !== confirmNewPassword) {
-                    showToast('New passwords do not match.', 'error')
-                    return
+            if (payload.newPassword.trim()) {
+                if (!payload.oldPassword.trim()) {
+                    return { ok: false, error: 'Please enter your current password.' }
                 }
 
                 const { error: signInErr } = await supabase.auth.signInWithPassword({
                     email: currentUserEmail,
-                    password: oldPassword.trim(),
+                    password: payload.oldPassword.trim(),
                 })
 
-                if (signInErr) {
-                    showToast('Incorrect old password.', 'error')
-                    return
-                }
+                if (signInErr) return { ok: false, error: 'Incorrect old password.' }
 
-                const { error: updateErr } = await supabase.auth.updateUser({ password: newPassword.trim() })
-                if (updateErr) throw updateErr
-
-                setOldPassword('')
-                setNewPassword('')
-                setConfirmNewPassword('')
+                const { error: updateErr } = await supabase.auth.updateUser({ password: payload.newPassword.trim() })
+                if (updateErr) return { ok: false, error: updateErr.message }
             }
 
+            setSettingsFullName(payload.fullName)
             showToast('Settings & security updated successfully!', 'success')
-            setShowSettingsModal(false)
-        } catch (err: any) {
-            showToast(err.message || 'Failed to update settings.', 'error')
+            return { ok: true }
+        } catch (err) {
+            return { ok: false, error: err instanceof Error ? err.message : 'Failed to update settings.' }
         }
     }
 
@@ -263,8 +242,7 @@ export default function TechnicianPortal() {
             }
 
             const fileExt = fileToUpload.name.split('.').pop()?.toLowerCase() || 'jpg'
-            const uniqueId = crypto.randomUUID().slice(0, 8)
-            const path = `${selectedVehicle.id}/${mediaType}/${categoryKey}_${Date.now()}_${uniqueId}.${fileExt}`
+            const path = `${selectedVehicle.id}/${mediaType}/${categoryKey}_${uniqueFileSuffix()}.${fileExt}`
 
             const { data: uploadData, error: uploadErr } = await supabase.storage
                 .from('vehicle-files')
@@ -432,7 +410,6 @@ export default function TechnicianPortal() {
     }
 
     const bgClass = isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'
-    const cardClass = isDark ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900 shadow-xl'
     const innerCard = isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'
 
     return (
@@ -453,76 +430,19 @@ export default function TechnicianPortal() {
 
             {/* Settings Modal */}
             {showSettingsModal && (
-                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto py-10">
-                    <div className={`border rounded-3xl shadow-2xl max-w-lg w-full p-8 max-h-[90vh] overflow-y-auto ${isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-slate-200 bg-white text-slate-900'}`}>
-                        <div className="flex justify-between items-center mb-6">
-                            <div>
-                                <h3 className={`text-lg font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>User Account Settings</h3>
-                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Manage appearance and security credentials.</p>
-                            </div>
-                            <button onClick={() => setShowSettingsModal(false)} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-900'}`}>&times;</button>
-                        </div>
-
-                        <form onSubmit={handleUpdateSettings} className="space-y-5">
-                            <div className={`p-4 rounded-2xl border ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'}`}>
-                                <label className={`block text-[11px] font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Interface Theme Mode</label>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button type="button" onClick={() => setTheme('light')} className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${theme === 'light' ? 'bg-blue-600 text-white border-blue-500 shadow-md' : isDark ? 'bg-slate-900 text-slate-400 border-slate-800' : 'bg-white text-slate-600 border-slate-200'}`}>☀️ Day Mode</button>
-                                    <button type="button" onClick={() => setTheme('dark')} className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${theme === 'dark' ? 'bg-blue-600 text-white border-blue-500 shadow-md' : isDark ? 'bg-slate-900 text-slate-400 border-slate-800' : 'bg-white text-slate-600 border-slate-200'}`}>🌙 Night Mode</button>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Email (Locked)</label>
-                                    <input type="text" disabled value={currentUserEmail} className={`w-full border rounded-xl p-3 text-xs font-medium cursor-not-allowed ${isDark ? 'border-slate-800 bg-slate-950 text-slate-500' : 'border-slate-200 bg-slate-100 text-slate-500'}`} />
-                                </div>
-                                <div>
-                                    <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Username (Locked)</label>
-                                    <input type="text" disabled value={settingsUsername} className={`w-full border rounded-xl p-3 text-xs font-medium cursor-not-allowed ${isDark ? 'border-slate-800 bg-slate-950 text-slate-500' : 'border-slate-200 bg-slate-100 text-slate-500'}`} />
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Full Name *</label>
-                                <input type="text" required value={settingsFullName} onChange={(e) => setSettingsFullName(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${isDark ? 'border-slate-800 bg-slate-950 text-white' : 'border-slate-200 bg-slate-50 text-slate-800'}`} />
-                            </div>
-
-                            <div className={`pt-4 border-t space-y-4 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                                <h4 className={`text-xs font-black uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Change Password (Optional)</h4>
-
-                                <div>
-                                    <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Current Password</label>
-                                    <div className="relative">
-                                        <input type={showOldPassword ? 'text' : 'password'} placeholder="••••••••" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${isDark ? 'border-slate-800 bg-slate-950 text-white' : 'border-slate-200 bg-slate-50 text-slate-800'}`} />
-                                        <button type="button" onClick={() => setShowOldPassword(!showOldPassword)} className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs cursor-pointer ${isDark ? 'text-slate-400 hover:text-blue-500' : 'text-slate-500 hover:text-blue-600'}`}>{showOldPassword ? '🙈' : '👁️'}</button>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>New Password</label>
-                                    <div className="relative">
-                                        <input type={showNewPassword ? 'text' : 'password'} placeholder="••••••••" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${isDark ? 'border-slate-800 bg-slate-950 text-white' : 'border-slate-200 bg-slate-50 text-slate-800'}`} />
-                                        <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs cursor-pointer ${isDark ? 'text-slate-400 hover:text-blue-500' : 'text-slate-500 hover:text-blue-600'}`}>{showNewPassword ? '🙈' : '👁️'}</button>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Confirm New Password</label>
-                                    <div className="relative">
-                                        <input type={showConfirmPassword ? 'text' : 'password'} placeholder="••••••••" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${isDark ? 'border-slate-800 bg-slate-950 text-white' : 'border-slate-200 bg-slate-50 text-slate-800'}`} />
-                                        <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs cursor-pointer ${isDark ? 'text-slate-400 hover:text-blue-500' : 'text-slate-500 hover:text-blue-600'}`}>{showConfirmPassword ? '🙈' : '👁️'}</button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className={`flex justify-end gap-3 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                                <button type="button" onClick={() => setShowSettingsModal(false)} className={`px-5 py-2.5 rounded-xl text-xs font-bold cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>Cancel</button>
-                                <button type="submit" className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer">Save Changes</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+                <AccountSettingsModal
+                    isDark={isDark}
+                    theme={theme}
+                    setTheme={setTheme}
+                    title="User Account Settings"
+                    subtitle="Manage appearance and security credentials."
+                    email={currentUserEmail}
+                    username={settingsUsername}
+                    fullName={settingsFullName}
+                    accent="blue"
+                    onClose={() => setShowSettingsModal(false)}
+                    onSave={handleSettingsSave}
+                />
             )}
 
             {/* Custom Label Dialog Modal */}
@@ -558,15 +478,15 @@ export default function TechnicianPortal() {
 
             {/* Header */}
             <header className={`border-b sticky top-0 z-40 backdrop-blur-md ${isDark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'}`}>
-                <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-2xl bg-emerald-600/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-black">🔧</div>
                         <div>
                             <h1 className="text-base font-extrabold tracking-tight">Technician Portal</h1>
-                            <p className="text-[11px] text-slate-400">Workshop Photo & Inspection Hub</p>
+                            <p className="text-[11px] text-slate-400 hidden sm:block">Workshop Photo & Inspection Hub</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                         <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className={`p-2 rounded-xl text-xs font-bold border cursor-pointer ${isDark ? 'border-slate-700 bg-slate-800 text-amber-300' : 'border-slate-200 bg-slate-100 text-amber-600'}`}>
                             {isDark ? '☀️' : '🌙'}
                         </button>
@@ -580,7 +500,7 @@ export default function TechnicianPortal() {
                 </div>
             </header>
 
-            <main className="max-w-7xl mx-auto px-6 py-8">
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
                 {selectedVehicle ? (
                     <div>
                         <div className="flex justify-between items-center mb-6">
@@ -589,18 +509,16 @@ export default function TechnicianPortal() {
                             </button>
                         </div>
 
-                        <div className={`border rounded-3xl p-8 mb-8 shadow-2xl ${cardClass}`}>
-                            <div className={`flex justify-between items-center pb-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                        <Card isDark={isDark} className="p-5 sm:p-8 mb-8 shadow-2xl">
+                            <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                                 <div>
-                                    <h2 className={`text-3xl font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedVehicle.plate_number}</h2>
+                                    <h2 className={`text-2xl sm:text-3xl font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedVehicle.plate_number}</h2>
                                     <p className={`mt-1 font-semibold text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{selectedVehicle.make_model_year}</p>
                                     <p className={`text-xs font-mono mt-2 inline-block px-3 py-1 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
                                         VIN: <span className={isDark ? 'text-white' : 'text-slate-900'}>{selectedVehicle.chassis_number}</span>
                                     </p>
                                 </div>
-                                <span className="px-4 py-2 rounded-xl text-xs font-extrabold bg-amber-950 text-amber-300 border border-amber-800 capitalize">
-                                    {selectedVehicle.status.replace(/_/g, ' ')}
-                                </span>
+                                <StatusBadge status={selectedVehicle.status} />
                             </div>
 
                             {/* Photo completeness banner */}
@@ -641,7 +559,7 @@ export default function TechnicianPortal() {
 
                             {/* 8 Mandatory Before/After Angles */}
                             <div className="pt-8 space-y-6">
-                                <div className="flex items-center justify-between">
+                                <div className="flex flex-wrap items-center justify-between gap-3">
                                     <h3 className={`text-sm font-extrabold tracking-wider uppercase ${isDark ? 'text-white' : 'text-slate-900'}`}>Workshop Inspection Evidence (8 Angles)</h3>
                                     <span className={`text-[11px] font-bold px-3 py-1 rounded-full border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
                                         Before {beforeCount}/8 · After {afterCount}/8
@@ -654,57 +572,28 @@ export default function TechnicianPortal() {
                                         const after = mediaItems.find(m => m.media_type === 'photo_after' && m.category === cat.key)
 
                                         return (
-                                            <div key={cat.key} className={`border rounded-2xl p-5 ${innerCard}`}>
+                                            <div key={cat.key} className={`border rounded-2xl p-4 sm:p-5 ${innerCard}`}>
                                                 <p className={`text-xs font-extrabold uppercase mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>{cat.label}</p>
 
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    {/* Before Photo */}
-                                                    <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
-                                                        <div>
-                                                            <p className="text-[10px] font-bold uppercase text-amber-400 mb-1">Before Repair</p>
-                                                            <p className={`text-[11px] mb-3 font-semibold ${before ? 'text-emerald-400' : 'text-slate-500'}`}>{before ? '✓ Captured' : 'Pending'}</p>
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            {before && (
-                                                                <>
-                                                                    <button onClick={() => setPreviewMedia({ url: before.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })} className={`w-full py-2 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-slate-900 text-emerald-400 border-slate-700' : 'bg-white text-emerald-600 border-slate-200'}`}>
-                                                                        View Photo
-                                                                    </button>
-                                                                    <button onClick={() => handleRemovePhoto(before)} className={`w-full py-2 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
-                                                                        Remove
-                                                                    </button>
-                                                                </>
-                                                            )}
-                                                            <label htmlFor={`upload-before-${cat.key}`} className="w-full block text-center py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow">
-                                                                {before ? 'Retake' : 'Upload'}
-                                                            </label>
-                                                            <input id={`upload-before-${cat.key}`} type="file" accept="image/*" className="hidden" onChange={(e) => handlePhotoSelect(e, cat.key, 'photo_before')} />
-                                                        </div>
-                                                    </div>
-
-                                                    {/* After Photo */}
-                                                    <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
-                                                        <div>
-                                                            <p className="text-[10px] font-bold uppercase text-blue-400 mb-1">After Repair</p>
-                                                            <p className={`text-[11px] mb-3 font-semibold ${after ? 'text-emerald-400' : 'text-slate-500'}`}>{after ? '✓ Captured' : 'Pending'}</p>
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            {after && (
-                                                                <>
-                                                                    <button onClick={() => setPreviewMedia({ url: after.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })} className={`w-full py-2 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-slate-900 text-blue-400 border-slate-700' : 'bg-white text-blue-600 border-slate-200'}`}>
-                                                                        View Photo
-                                                                    </button>
-                                                                    <button onClick={() => handleRemovePhoto(after)} className={`w-full py-2 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
-                                                                        Remove
-                                                                    </button>
-                                                                </>
-                                                            )}
-                                                            <label htmlFor={`upload-after-${cat.key}`} className="w-full block text-center py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow">
-                                                                {after ? 'Retake' : 'Upload'}
-                                                            </label>
-                                                            <input id={`upload-after-${cat.key}`} type="file" accept="image/*" className="hidden" onChange={(e) => handlePhotoSelect(e, cat.key, 'photo_after')} />
-                                                        </div>
-                                                    </div>
+                                                <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-4">
+                                                    <PhotoEvidenceCell
+                                                        isDark={isDark}
+                                                        phase="before"
+                                                        isCaptured={!!before}
+                                                        onView={() => setPreviewMedia({ url: before!.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })}
+                                                        onRemove={() => handleRemovePhoto(before!)}
+                                                        onFileChange={(e) => handlePhotoSelect(e, cat.key, 'photo_before')}
+                                                        inputId={`upload-before-${cat.key}`}
+                                                    />
+                                                    <PhotoEvidenceCell
+                                                        isDark={isDark}
+                                                        phase="after"
+                                                        isCaptured={!!after}
+                                                        onView={() => setPreviewMedia({ url: after!.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })}
+                                                        onRemove={() => handleRemovePhoto(after!)}
+                                                        onFileChange={(e) => handlePhotoSelect(e, cat.key, 'photo_after')}
+                                                        inputId={`upload-after-${cat.key}`}
+                                                    />
                                                 </div>
                                             </div>
                                         )
@@ -714,8 +603,8 @@ export default function TechnicianPortal() {
 
                             {/* 3. ADDITIONAL PHOTOS & EVIDENCE */}
                             <div className="pt-8 space-y-4">
-                                <div className={`border rounded-2xl p-5 ${innerCard}`}>
-                                    <div className="flex justify-between items-center mb-4">
+                                <div className={`border rounded-2xl p-4 sm:p-5 ${innerCard}`}>
+                                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                                         <div>
                                             <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-purple-300' : 'text-purple-700'}`}>3. Additional Evidence Photos</h3>
                                             <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload close-up damage details, part codes, or extra inspection angles.</p>
@@ -775,50 +664,51 @@ export default function TechnicianPortal() {
                                     )}
                                 </div>
                             </div>
-                        </div>
+                        </Card>
                     </div>
                 ) : (
                     <div>
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-xl font-black tracking-tight">Active Workshop Vehicles</h2>
-                            <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full border ${isDark ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-slate-200 bg-white text-slate-600'}`}>Queue: {vehicles.length} Vehicles</span>
-                        </div>
+                        <SectionHeading
+                            isDark={isDark}
+                            title="Active Workshop Vehicles"
+                            right={
+                                <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full border ${isDark ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-slate-200 bg-white text-slate-600'}`}>
+                                    Queue: {vehicles.length} Vehicles
+                                </span>
+                            }
+                        />
 
                         {loading ? (
-                            <div className="p-16 text-center text-slate-500 font-medium">Loading workshop queue...</div>
+                            <EmptyState isDark={isDark} message="Loading workshop queue..." />
                         ) : vehicles.length === 0 ? (
-                            <div className="p-16 text-center text-slate-500 font-medium">No vehicles currently assigned to the workshop queue.</div>
+                            <EmptyState isDark={isDark} message="No vehicles currently assigned to the workshop queue." />
                         ) : (
-                            <div className={`border rounded-3xl shadow-xl overflow-hidden ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
-                                <table className="w-full text-left border-collapse">
-                                    <thead>
-                                        <tr className={`text-[11px] uppercase font-bold border-b ${isDark ? 'text-slate-400 border-slate-800 bg-slate-900/80' : 'text-slate-500 border-slate-200 bg-slate-100'}`}>
-                                            <th className="p-4.5">Plate Number</th>
-                                            <th className="p-4.5">Make / Model / Year</th>
-                                            <th className="p-4.5">Current Status</th>
-                                            <th className="p-4.5 text-right">Action</th>
+                            <ResponsiveTable isDark={isDark} minWidth="min-w-[640px]">
+                                <thead>
+                                    <tr className={`text-[11px] uppercase font-bold border-b ${isDark ? 'text-slate-400 border-slate-800 bg-slate-900/80' : 'text-slate-500 border-slate-200 bg-slate-100'}`}>
+                                        <th className="p-4">Plate Number</th>
+                                        <th className="p-4">Make / Model / Year</th>
+                                        <th className="p-4">Current Status</th>
+                                        <th className="p-4 text-right">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
+                                    {vehicles.map((v) => (
+                                        <tr key={v.id} className={`transition-colors ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
+                                            <td className="p-4 font-bold text-sm text-emerald-400">{v.plate_number}</td>
+                                            <td className="p-4">{v.make_model_year}</td>
+                                            <td className="p-4">
+                                                <StatusBadge status={v.status} />
+                                            </td>
+                                            <td className="p-4 text-right">
+                                                <button onClick={() => setSelectedVehicle(v)} className="px-3.5 py-1.5 rounded-xl font-bold bg-emerald-950 text-emerald-300 border border-emerald-800 hover:bg-emerald-900 cursor-pointer">
+                                                    Capture Evidence &rarr;
+                                                </button>
+                                            </td>
                                         </tr>
-                                    </thead>
-                                    <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
-                                        {vehicles.map((v) => (
-                                            <tr key={v.id} className={`transition-colors ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
-                                                <td className="p-4.5 font-bold text-sm text-emerald-400">{v.plate_number}</td>
-                                                <td className="p-4.5">{v.make_model_year}</td>
-                                                <td className="p-4.5">
-                                                    <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-amber-950 text-amber-300 border border-amber-800 capitalize">
-                                                        {v.status.replace(/_/g, ' ')}
-                                                    </span>
-                                                </td>
-                                                <td className="p-4.5 text-right">
-                                                    <button onClick={() => setSelectedVehicle(v)} className="px-3.5 py-1.5 rounded-xl font-bold bg-emerald-950 text-emerald-300 border border-emerald-800 hover:bg-emerald-900 cursor-pointer">
-                                                        Capture Evidence &rarr;
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                                    ))}
+                                </tbody>
+                            </ResponsiveTable>
                         )}
                     </div>
                 )}

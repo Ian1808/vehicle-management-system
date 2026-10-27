@@ -6,10 +6,18 @@ import Link from 'next/link'
 import { addWatermarkToFile } from '@/utils/watermark'
 import { fetchActiveVehicles, fetchVehicleMedia, insertVehicle, updateVehicleStatus, deleteDocumentRecord } from '@/services/vehicleService'
 import { useTheme } from '@/lib/theme'
+import { PHOTO_CATEGORIES } from '@/lib/photoCategories'
+import { uniqueFileSuffix } from '@/lib/uploadUtils'
 import VehicleIntakeModal from '@/components/forms/VehicleIntakeModal'
 import ConfirmModal from '@/components/ui/ConfirmModal'
 import PreviewModal from '@/components/ui/PreviewModal'
 import Toast from '@/components/ui/Toast'
+import AccountSettingsModal, { type AccountSettingsPayload } from '@/components/ui/AccountSettingsModal'
+import Card from '@/components/ui/Card'
+import StatusBadge from '@/components/ui/StatusBadge'
+import SectionHeading from '@/components/ui/SectionHeading'
+import EmptyState from '@/components/ui/EmptyState'
+import ResponsiveTable from '@/components/ui/ResponsiveTable'
 
 type Vehicle = {
   id: string
@@ -42,16 +50,11 @@ type ConfirmState = {
 } | null
 type PreviewState = { url: string; title: string } | null
 
-const PHOTO_CATEGORIES = [
-  { key: 'front', label: 'Front View' },
-  { key: 'back', label: 'Back View' },
-  { key: 'left', label: 'Left Side' },
-  { key: 'right', label: 'Right Side' },
-  { key: 'windshield', label: 'Front Windshield' },
-  { key: 'meter_gauge', label: 'Meter Gauge' },
-  { key: 'engine_bay', label: 'Engine Bay' },
-  { key: 'chassis_number', label: 'Chassis Number (VIN)' },
-]
+const DOCUMENT_CATEGORIES = ['grant', 'jpj', 'insurance', 'ber'] as const
+
+function documentLabel(category: string): string {
+  return category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
+}
 
 export default function FrontDeskDashboard() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
@@ -74,12 +77,6 @@ export default function FrontDeskDashboard() {
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('')
   const [settingsFullName, setSettingsFullName] = useState('')
   const [settingsUsername, setSettingsUsername] = useState('')
-  const [oldPassword, setOldPassword] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmNewPassword, setConfirmNewPassword] = useState('')
-  const [showOldPassword, setShowOldPassword] = useState(false)
-  const [showNewPassword, setShowNewPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   const supabase = createClient()
 
@@ -160,50 +157,40 @@ export default function FrontDeskDashboard() {
     }
   }
 
-  async function handleUpdateSettings(e: React.FormEvent) {
-    e.preventDefault()
-    if (!currentUserId) return
+  async function handleSettingsSave(payload: AccountSettingsPayload): Promise<{ ok: boolean; error?: string }> {
+    if (!currentUserId) return { ok: false, error: 'Not authenticated.' }
 
     try {
       const { error: profileError } = await supabase
         .from('users')
-        .update({ full_name: settingsFullName })
+        .update({ full_name: payload.fullName })
         .eq('id', currentUserId)
 
       if (profileError) throw profileError
 
-      if (newPassword.trim()) {
-        if (!oldPassword.trim()) {
-          showToast('Please enter your current password.', 'error')
-          return
-        }
-        if (newPassword !== confirmNewPassword) {
-          showToast('New passwords do not match.', 'error')
-          return
+      if (payload.newPassword.trim()) {
+        if (!payload.oldPassword.trim()) {
+          return { ok: false, error: 'Please enter your current password.' }
         }
 
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email: currentUserEmail,
-          password: oldPassword.trim(),
+          password: payload.oldPassword.trim(),
         })
 
         if (signInError) {
-          showToast('Incorrect old password.', 'error')
-          return
+          return { ok: false, error: 'Incorrect old password.' }
         }
 
-        const { error: passwordError } = await supabase.auth.updateUser({ password: newPassword.trim() })
+        const { error: passwordError } = await supabase.auth.updateUser({ password: payload.newPassword.trim() })
         if (passwordError) throw passwordError
-
-        setOldPassword('')
-        setNewPassword('')
-        setConfirmNewPassword('')
       }
 
+      setSettingsFullName(payload.fullName)
       showToast('Settings & security updated successfully!', 'success')
-      setShowSettingsModal(false)
+      return { ok: true }
     } catch (err: any) {
-      showToast(err.message || 'Failed to update settings.', 'error')
+      return { ok: false, error: err.message || 'Failed to update settings.' }
     }
   }
 
@@ -217,11 +204,9 @@ export default function FrontDeskDashboard() {
       return
     }
 
-    const label = category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
-
     setConfirmModal({
       title: 'Confirm Document Upload',
-      message: `Watermark and upload "${file.name}" for ${label}?`,
+      message: `Watermark and upload "${file.name}" for ${documentLabel(category)}?`,
       confirmText: 'Upload Document',
       confirmVariant: 'primary',
       onConfirm: () => executeFileUpload(file, category),
@@ -246,7 +231,7 @@ export default function FrontDeskDashboard() {
       }
 
       const fileExt = fileToUpload.name.split('.').pop()?.toLowerCase() || 'jpg'
-      const fileName = `${selectedVehicle.id}/docs/${category}_${Date.now()}.${fileExt}`
+      const fileName = `${selectedVehicle.id}/docs/${category}_${uniqueFileSuffix()}.${fileExt}`
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('vehicle-files')
@@ -274,10 +259,9 @@ export default function FrontDeskDashboard() {
   }
 
   function requestDeleteDocument(category: string) {
-    const label = category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
     setConfirmModal({
       title: 'Confirm Document Removal',
-      message: `Are you sure you want to remove the ${label}?`,
+      message: `Are you sure you want to remove the ${documentLabel(category)}?`,
       confirmText: 'Remove Document',
       confirmVariant: 'danger',
       onConfirm: () => executeDeleteDocument(category),
@@ -359,6 +343,8 @@ export default function FrontDeskDashboard() {
     }
   }
 
+  const innerCard = isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'
+
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
       {toast && <Toast message={toast.message} type={toast.type} isDark={isDark} />}
@@ -377,89 +363,32 @@ export default function FrontDeskDashboard() {
 
       {/* Settings Modal */}
       {showSettingsModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto py-10">
-          <div className={`border rounded-3xl shadow-2xl max-w-lg w-full p-8 max-h-[90vh] overflow-y-auto ${isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-slate-200 bg-white text-slate-900'}`}>
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h3 className={`text-lg font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>User Account Settings</h3>
-                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Manage appearance, profile, and security credentials.</p>
-              </div>
-              <button onClick={() => setShowSettingsModal(false)} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-900'}`}>&times;</button>
-            </div>
-
-            <form onSubmit={handleUpdateSettings} className="space-y-5">
-              <div className={`p-4 rounded-2xl border ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'}`}>
-                <label className={`block text-[11px] font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Interface Theme Mode</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button type="button" onClick={() => setTheme('light')} className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${theme === 'light' ? 'bg-blue-600 text-white border-blue-500 shadow-md' : isDark ? 'bg-slate-900 text-slate-400 border-slate-800' : 'bg-white text-slate-600 border-slate-200'}`}>☀️ Day Mode</button>
-                  <button type="button" onClick={() => setTheme('dark')} className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${theme === 'dark' ? 'bg-blue-600 text-white border-blue-500 shadow-md' : isDark ? 'bg-slate-900 text-slate-400 border-slate-800' : 'bg-white text-slate-600 border-slate-200'}`}>🌙 Night Mode</button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Email (Locked)</label>
-                  <input type="text" disabled value={currentUserEmail} className={`w-full border rounded-xl p-3 text-xs font-medium cursor-not-allowed ${isDark ? 'border-slate-800 bg-slate-950 text-slate-500' : 'border-slate-200 bg-slate-100 text-slate-500'}`} />
-                </div>
-                <div>
-                  <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Username (Locked)</label>
-                  <input type="text" disabled value={settingsUsername} className={`w-full border rounded-xl p-3 text-xs font-medium cursor-not-allowed ${isDark ? 'border-slate-800 bg-slate-950 text-slate-500' : 'border-slate-200 bg-slate-100 text-slate-500'}`} />
-                </div>
-              </div>
-
-              <div>
-                <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Full Name *</label>
-                <input type="text" required value={settingsFullName} onChange={(e) => setSettingsFullName(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${isDark ? 'border-slate-800 bg-slate-950 text-white' : 'border-slate-200 bg-slate-50 text-slate-800'}`} />
-              </div>
-
-              <div className={`pt-4 border-t space-y-4 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                <h4 className={`text-xs font-black uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Change Password (Optional)</h4>
-
-                <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Current Password</label>
-                  <div className="relative">
-                    <input type={showOldPassword ? 'text' : 'password'} placeholder="••••••••" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${isDark ? 'border-slate-800 bg-slate-950 text-white' : 'border-slate-200 bg-slate-50 text-slate-800'}`} />
-                    <button type="button" onClick={() => setShowOldPassword(!showOldPassword)} className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs cursor-pointer ${isDark ? 'text-slate-400 hover:text-blue-500' : 'text-slate-500 hover:text-blue-600'}`}>{showOldPassword ? '🙈 Hide' : '👁️ View'}</button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>New Password</label>
-                  <div className="relative">
-                    <input type={showNewPassword ? 'text' : 'password'} placeholder="••••••••" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${isDark ? 'border-slate-800 bg-slate-950 text-white' : 'border-slate-200 bg-slate-50 text-slate-800'}`} />
-                    <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs cursor-pointer ${isDark ? 'text-slate-400 hover:text-blue-500' : 'text-slate-500 hover:text-blue-600'}`}>{showNewPassword ? '🙈 Hide' : '👁️ View'}</button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Confirm New Password</label>
-                  <div className="relative">
-                    <input type={showConfirmPassword ? 'text' : 'password'} placeholder="••••••••" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${isDark ? 'border-slate-800 bg-slate-950 text-white' : 'border-slate-200 bg-slate-50 text-slate-800'}`} />
-                    <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs cursor-pointer ${isDark ? 'text-slate-400 hover:text-blue-500' : 'text-slate-500 hover:text-blue-600'}`}>{showConfirmPassword ? '🙈 Hide' : '👁️ View'}</button>
-                  </div>
-                </div>
-              </div>
-
-              <div className={`flex justify-end gap-3 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                <button type="button" onClick={() => setShowSettingsModal(false)} className={`px-5 py-2.5 rounded-xl text-xs font-bold cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>Cancel</button>
-                <button type="submit" className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer">Save Changes</button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <AccountSettingsModal
+          isDark={isDark}
+          theme={theme}
+          setTheme={setTheme}
+          title="User Account Settings"
+          subtitle="Manage appearance, profile, and security credentials."
+          email={currentUserEmail}
+          username={settingsUsername}
+          fullName={settingsFullName}
+          accent="blue"
+          onClose={() => setShowSettingsModal(false)}
+          onSave={handleSettingsSave}
+        />
       )}
 
       {/* Header */}
       <header className={`border-b sticky top-0 z-40 backdrop-blur-md ${isDark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'}`}>
-        <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-2xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-black">🚗</div>
             <div>
               <h1 className="text-base font-extrabold tracking-tight">Vehicle Management System</h1>
-              <p className="text-[11px] text-slate-400">Front Desk Dashboard</p>
+              <p className="text-[11px] text-slate-400 hidden sm:block">Front Desk Dashboard</p>
             </div>
           </div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
             <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className={`p-2 rounded-xl text-xs font-bold border cursor-pointer ${isDark ? 'border-slate-700 bg-slate-800 text-amber-300' : 'border-slate-200 bg-slate-100 text-amber-600'}`}>
               {isDark ? '☀️' : '🌙'}
             </button>
@@ -477,10 +406,10 @@ export default function FrontDeskDashboard() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {selectedVehicle ? (
           <div>
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
               <button onClick={() => setSelectedVehicle(null)} className={`text-xs font-bold px-3.5 py-2 rounded-xl border cursor-pointer ${isDark ? 'border-slate-800 bg-slate-950 text-blue-400' : 'border-slate-200 bg-white text-blue-600'}`}>
                 &larr; Back to Registry
               </button>
@@ -492,36 +421,34 @@ export default function FrontDeskDashboard() {
               )}
             </div>
 
-            <div className={`border rounded-3xl p-8 mb-8 shadow-2xl ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
-              <div className={`flex justify-between items-center pb-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+            <Card isDark={isDark} className="p-5 sm:p-8 mb-8 shadow-2xl">
+              <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                 <div>
-                  <div className="flex items-center gap-3">
-                    <h2 className={`text-3xl font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedVehicle.plate_number}</h2>
-                    <span className="px-3.5 py-1 rounded-full text-[11px] font-bold uppercase bg-amber-950 text-amber-300 border border-amber-800">
-                      {selectedVehicle.status.replace(/_/g, ' ')}
-                    </span>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h2 className={`text-2xl sm:text-3xl font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedVehicle.plate_number}</h2>
+                    <StatusBadge status={selectedVehicle.status} />
                   </div>
                   <p className={`mt-1 font-semibold text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{selectedVehicle.make_model_year}</p>
                   <p className={`text-xs font-mono mt-2 inline-block px-3 py-1 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
                     VIN: <span className={isDark ? 'text-white' : 'text-slate-900'}>{selectedVehicle.chassis_number}</span>
                   </p>
                 </div>
-                <div className={`px-4 py-3 rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                <div className={`px-4 py-3 rounded-2xl border w-fit ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                   <p className="text-[10px] uppercase text-slate-400 font-extrabold tracking-wider">Insurance Panel</p>
                   <p className={`text-sm font-bold mt-0.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedVehicle.insurance_panel || 'None Assigned'}</p>
                 </div>
               </div>
 
               <div className={`grid grid-cols-1 md:grid-cols-3 gap-5 py-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                <div className={`p-5 rounded-2xl border ${isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'}`}>
+                <div className={`p-5 rounded-2xl border ${innerCard}`}>
                   <p className="text-[11px] font-bold text-slate-400 uppercase">Intake Cost</p>
                   <p className={`text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.intake_cost?.toLocaleString()}</p>
                 </div>
-                <div className={`p-5 rounded-2xl border ${isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'}`}>
+                <div className={`p-5 rounded-2xl border ${innerCard}`}>
                   <p className="text-[11px] font-bold text-slate-400 uppercase">Market Value (Paqar)</p>
                   <p className={`text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.market_value?.toLocaleString()}</p>
                 </div>
-                <div className={`p-5 rounded-2xl border ${isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'}`}>
+                <div className={`p-5 rounded-2xl border ${innerCard}`}>
                   <p className="text-[11px] font-bold text-slate-400 uppercase">Total Repair Cost</p>
                   <p className={`text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.repair_cost?.toLocaleString()}</p>
                 </div>
@@ -531,23 +458,24 @@ export default function FrontDeskDashboard() {
               <div className={`pt-6 pb-8 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                 <h3 className={`text-sm font-extrabold mb-4 tracking-wider uppercase ${isDark ? 'text-white' : 'text-slate-900'}`}>1. Mandatory Document Management</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {['grant', 'jpj', 'insurance', 'ber'].map((cat) => {
+                  {DOCUMENT_CATEGORIES.map((cat) => {
                     const doc = mediaItems.find(m => m.media_type === 'document' && m.category === cat)
-                    const label = cat === 'grant' ? 'Vehicle Grant (VOC)' : cat === 'jpj' ? 'JPJ Inspection' : cat === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
                     return (
-                      <div key={cat} className={`border rounded-2xl p-5 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'}`}>
+                      <div key={cat} className={`border rounded-2xl p-5 flex flex-col justify-between ${innerCard}`}>
                         <div>
-                          <p className={`text-xs font-extrabold uppercase mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{label}</p>
+                          <p className={`text-xs font-extrabold uppercase mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{documentLabel(cat)}</p>
                           <p className={`text-xs font-semibold mb-5 ${doc ? 'text-emerald-400' : 'text-slate-500'}`}>{doc ? '✓ Verified & Stored' : 'Pending Upload'}</p>
                         </div>
                         {doc ? (
                           <div className="flex gap-2">
-                            <button onClick={() => setPreviewMedia({ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${label}` })} className="w-1/2 bg-blue-950 text-blue-300 hover:bg-blue-900 py-2.5 rounded-xl text-xs font-bold border border-blue-800 cursor-pointer">View</button>
+                            <button onClick={() => setPreviewMedia({ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${documentLabel(cat)}` })} className="w-1/2 bg-blue-950 text-blue-300 hover:bg-blue-900 py-2.5 rounded-xl text-xs font-bold border border-blue-800 cursor-pointer">View</button>
                             <button onClick={() => requestDeleteDocument(cat)} className="w-1/2 bg-rose-950 text-rose-300 hover:bg-rose-900 py-2.5 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer">Remove</button>
                           </div>
                         ) : (
                           <div>
-                            <label htmlFor={`file-${cat}`} className="w-full block text-center bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow-md">Upload File</label>
+                            <label htmlFor={`file-${cat}`} className="w-full block text-center bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow-md">
+                              {uploadingCategory === cat ? 'Uploading…' : 'Upload File'}
+                            </label>
                             <input id={`file-${cat}`} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => handleFileSelect(e, cat)} />
                           </div>
                         )}
@@ -584,52 +512,53 @@ export default function FrontDeskDashboard() {
                   })}
                 </div>
               </div>
-            </div>
+            </Card>
           </div>
         ) : (
           <div>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-black tracking-tight">Active Vehicle Registry</h2>
-              <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full border ${isDark ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-slate-200 bg-white text-slate-600'}`}>Total: {vehicles.length} Vehicles</span>
-            </div>
+            <SectionHeading
+              isDark={isDark}
+              title="Active Vehicle Registry"
+              right={
+                <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full border ${isDark ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-slate-200 bg-white text-slate-600'}`}>
+                  Total: {vehicles.length} Vehicles
+                </span>
+              }
+            />
 
             {loading ? (
-              <div className="p-16 text-center text-slate-500 font-medium">Loading vehicle registry...</div>
+              <EmptyState isDark={isDark} message="Loading vehicle registry..." />
             ) : vehicles.length === 0 ? (
-              <div className="p-16 text-center text-slate-500 font-medium">No vehicles found. Click "+ New Vehicle Intake" to get started.</div>
+              <EmptyState isDark={isDark} message="No vehicles found. Click “+ New Vehicle Intake” to get started." />
             ) : (
-              <div className={`border rounded-3xl shadow-xl overflow-hidden ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className={`text-[11px] uppercase font-bold border-b ${isDark ? 'text-slate-400 border-slate-800 bg-slate-900/80' : 'text-slate-500 border-slate-200 bg-slate-100'}`}>
-                      <th className="p-4.5">Plate Number</th>
-                      <th className="p-4.5">Make / Model / Year</th>
-                      <th className="p-4.5">Insurance Panel</th>
-                      <th className="p-4.5">Status</th>
-                      <th className="p-4.5">Intake Cost</th>
-                      <th className="p-4.5 text-right">Action</th>
+              <ResponsiveTable isDark={isDark} minWidth="min-w-[760px]">
+                <thead>
+                  <tr className={`text-[11px] uppercase font-bold border-b ${isDark ? 'text-slate-400 border-slate-800 bg-slate-900/80' : 'text-slate-500 border-slate-200 bg-slate-100'}`}>
+                    <th className="p-4">Plate Number</th>
+                    <th className="p-4">Make / Model / Year</th>
+                    <th className="p-4">Insurance Panel</th>
+                    <th className="p-4">Status</th>
+                    <th className="p-4">Intake Cost</th>
+                    <th className="p-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
+                  {vehicles.map((v) => (
+                    <tr key={v.id} className={`transition-colors ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
+                      <td className="p-4 font-bold text-sm text-blue-400">{v.plate_number}</td>
+                      <td className="p-4">{v.make_model_year}</td>
+                      <td className="p-4 text-slate-400">{v.insurance_panel || 'N/A'}</td>
+                      <td className="p-4">
+                        <StatusBadge status={v.status} />
+                      </td>
+                      <td className={`p-4 font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {v.intake_cost?.toLocaleString()}</td>
+                      <td className="p-4 text-right">
+                        <button onClick={() => setSelectedVehicle(v)} className="px-3.5 py-1.5 rounded-xl font-bold bg-blue-950 text-blue-300 border border-blue-800 hover:bg-blue-900 cursor-pointer">Inspect Details &rarr;</button>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
-                    {vehicles.map((v) => (
-                      <tr key={v.id} className={`transition-colors ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
-                        <td className="p-4.5 font-bold text-sm text-blue-400">{v.plate_number}</td>
-                        <td className="p-4.5">{v.make_model_year}</td>
-                        <td className="p-4.5 text-slate-400">{v.insurance_panel || 'N/A'}</td>
-                        <td className="p-4.5">
-                          <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-amber-950 text-amber-300 border border-amber-800 capitalize">
-                            {v.status.replace(/_/g, ' ')}
-                          </span>
-                        </td>
-                        <td className={`p-4.5 font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {v.intake_cost?.toLocaleString()}</td>
-                        <td className="p-4.5 text-right">
-                          <button onClick={() => setSelectedVehicle(v)} className="px-3.5 py-1.5 rounded-xl font-bold bg-blue-950 text-blue-300 border border-blue-800 hover:bg-blue-900 cursor-pointer">Inspect Details &rarr;</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </ResponsiveTable>
             )}
           </div>
         )}

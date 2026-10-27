@@ -4,6 +4,19 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { useTheme } from '@/lib/theme'
 import Link from 'next/link'
+import Toast from '@/components/ui/Toast'
+import ConfirmModal from '@/components/ui/ConfirmModal'
+import PreviewModal from '@/components/ui/PreviewModal'
+import AccountSettingsModal, { type AccountSettingsPayload } from '@/components/ui/AccountSettingsModal'
+import Card from '@/components/ui/Card'
+import StatusBadge from '@/components/ui/StatusBadge'
+import SectionHeading from '@/components/ui/SectionHeading'
+import EmptyState from '@/components/ui/EmptyState'
+import ResponsiveTable from '@/components/ui/ResponsiveTable'
+import StaffUserModal, { type StaffUserPayload } from '@/components/admin/StaffUserModal'
+import ChangePasswordModal from '@/components/admin/ChangePasswordModal'
+import BankModal, { type BankPayload, type BankRecord } from '@/components/admin/BankModal'
+import VehicleAuditGrid from '@/components/admin/VehicleAuditGrid'
 
 type Vehicle = {
     id: string
@@ -17,15 +30,6 @@ type Vehicle = {
     repair_cost: number
     is_deleted?: boolean
     created_at: string
-}
-
-type Bank = {
-    id: string
-    bank_name: string
-    accepts_ber: boolean
-    accepts_refinance: boolean
-    notes: string
-    updated_at: string
 }
 
 type UserProfile = {
@@ -65,22 +69,20 @@ type PreviewMedia = {
     title: string
 }
 
-const PHOTO_CATEGORIES = [
-    { key: 'front', label: 'Front View' },
-    { key: 'back', label: 'Back View' },
-    { key: 'left', label: 'Left Side' },
-    { key: 'right', label: 'Right Side' },
-    { key: 'windshield', label: 'Front Windshield' },
-    { key: 'meter_gauge', label: 'Meter Gauge' },
-    { key: 'engine_bay', label: 'Engine Bay' },
-    { key: 'chassis_number', label: 'Chassis Number (VIN)' },
-]
+const TABS = [
+    { key: 'vehicles', label: '🚗 Vehicle Master Registry' },
+    { key: 'users', label: '👥 Staff & User Management' },
+    { key: 'banks', label: '🏦 Panel Bank Criteria' },
+    { key: 'trash', label: '🗑️ Trash / Recovery' },
+] as const
+
+const ROLE_FILTERS = ['all', 'admin', 'front_desk', 'technician'] as const
 
 export default function AdminHub() {
     const [activeTab, setActiveTab] = useState<'vehicles' | 'users' | 'banks' | 'trash'>('vehicles')
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [deletedVehicles, setDeletedVehicles] = useState<Vehicle[]>([])
-    const [banks, setBanks] = useState<Bank[]>([])
+    const [banks, setBanks] = useState<BankRecord[]>([])
     const [users, setUsers] = useState<UserProfile[]>([])
     const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
@@ -92,25 +94,14 @@ export default function AdminHub() {
 
     // New Bank Modal State
     const [showBankModal, setShowBankModal] = useState(false)
-    const [editingBank, setEditingBank] = useState<Bank | null>(null)
-    const [bankNameInput, setBankNameInput] = useState('')
-    const [bankAcceptsBer, setBankAcceptsBer] = useState(false)
-    const [bankAcceptsRefinance, setBankAcceptsRefinance] = useState(false)
-    const [bankNotesInput, setBankNotesInput] = useState('')
+    const [editingBank, setEditingBank] = useState<BankRecord | null>(null)
 
     // New Staff User Modal State
     const [showUserModal, setShowUserModal] = useState(false)
-    const [newUserUsername, setNewUserUsername] = useState('')
-    const [newUserEmail, setNewUserEmail] = useState('')
-    const [newUserPassword, setNewUserPassword] = useState('')
-    const [newUserFullName, setNewUserFullName] = useState('')
-    const [newUserRole, setNewUserRole] = useState('front_desk')
     const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'front_desk' | 'technician'>('all')
 
     // Edit User Password Modal State
     const [editingPasswordUser, setEditingPasswordUser] = useState<UserProfile | null>(null)
-    const [adminNewPassword, setAdminNewPassword] = useState('')
-    const [showAdminNewPassword, setShowAdminNewPassword] = useState(false)
 
     // Theme State ('dark' | 'light') — shared across all pages via useTheme()
     const { theme, setTheme, isDark } = useTheme()
@@ -121,14 +112,6 @@ export default function AdminHub() {
     const [currentUserEmail, setCurrentUserEmail] = useState<string>('')
     const [settingsFullName, setSettingsFullName] = useState('')
     const [settingsUsername, setSettingsUsername] = useState('')
-
-    // Secure Password Change State
-    const [oldPassword, setOldPassword] = useState('')
-    const [newPassword, setNewPassword] = useState('')
-    const [confirmNewPassword, setConfirmNewPassword] = useState('')
-    const [showOldPassword, setShowOldPassword] = useState(false)
-    const [showNewPassword, setShowNewPassword] = useState(false)
-    const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
     const supabase = createClient()
 
@@ -239,19 +222,18 @@ export default function AdminHub() {
         fetchMedia(v.id)
     }
 
-    async function handleSaveBank(e: React.FormEvent) {
-        e.preventDefault()
-        if (!bankNameInput.trim()) return
+    async function handleSaveBank(payload: BankPayload): Promise<boolean> {
+        if (!payload.bankName.trim()) return false
 
         try {
             if (editingBank) {
                 const { error } = await supabase
                     .from('banks')
                     .update({
-                        bank_name: bankNameInput.trim(),
-                        accepts_ber: bankAcceptsBer,
-                        accepts_refinance: bankAcceptsRefinance,
-                        notes: bankNotesInput.trim(),
+                        bank_name: payload.bankName.trim(),
+                        accepts_ber: payload.acceptsBer,
+                        accepts_refinance: payload.acceptsRefinance,
+                        notes: payload.notes.trim(),
                         updated_at: new Date().toISOString(),
                     })
                     .eq('id', editingBank.id)
@@ -262,53 +244,49 @@ export default function AdminHub() {
                 const { error } = await supabase
                     .from('banks')
                     .insert([{
-                        bank_name: bankNameInput.trim(),
-                        accepts_ber: bankAcceptsBer,
-                        accepts_refinance: bankAcceptsRefinance,
-                        notes: bankNotesInput.trim(),
+                        bank_name: payload.bankName.trim(),
+                        accepts_ber: payload.acceptsBer,
+                        accepts_refinance: payload.acceptsRefinance,
+                        notes: payload.notes.trim(),
                     }])
 
                 if (error) throw error
                 showToast('New bank added successfully!', 'success')
             }
 
-            setShowBankModal(false)
-            setEditingBank(null)
-            setBankNameInput('')
-            setBankAcceptsBer(false)
-            setBankAcceptsRefinance(false)
-            setBankNotesInput('')
             fetchBanks()
+            return true
         } catch (err: any) {
             showToast(err.message || 'Failed to save bank record.', 'error')
+            return false
         }
     }
 
-    function openEditBankModal(b: Bank) {
+    function openEditBankModal(b: BankRecord) {
         setEditingBank(b)
-        setBankNameInput(b.bank_name)
-        setBankAcceptsBer(b.accepts_ber)
-        setBankAcceptsRefinance(b.accepts_refinance)
-        setBankNotesInput(b.notes || '')
         setShowBankModal(true)
     }
 
-    async function handleCreateStaffUser(e: React.FormEvent) {
-        e.preventDefault()
-        if (!newUserUsername.trim() || !newUserEmail.trim() || !newUserPassword.trim() || !newUserFullName.trim()) return
+    function openNewBankModal() {
+        setEditingBank(null)
+        setShowBankModal(true)
+    }
+
+    async function handleCreateStaffUser(payload: StaffUserPayload): Promise<boolean> {
+        if (!payload.username.trim() || !payload.email.trim() || !payload.password.trim() || !payload.fullName.trim()) return false
 
         try {
-            const cleanUsername = newUserUsername.trim().toLowerCase()
-            const cleanEmail = newUserEmail.trim().toLowerCase()
+            const cleanUsername = payload.username.trim().toLowerCase()
+            const cleanEmail = payload.email.trim().toLowerCase()
 
             const { data, error } = await supabase.auth.signUp({
                 email: cleanEmail,
-                password: newUserPassword.trim(),
+                password: payload.password.trim(),
                 options: {
                     data: {
-                        full_name: newUserFullName.trim(),
+                        full_name: payload.fullName.trim(),
                         username: cleanUsername,
-                        role: newUserRole,
+                        role: payload.role,
                     },
                 },
             })
@@ -322,22 +300,18 @@ export default function AdminHub() {
                         id: data.user.id,
                         username: cleanUsername,
                         email: cleanEmail,
-                        full_name: newUserFullName.trim(),
-                        role: newUserRole,
+                        full_name: payload.fullName.trim(),
+                        role: payload.role,
                         is_suspended: false,
                     })
             }
 
             showToast('Staff member registered successfully!', 'success')
-            setShowUserModal(false)
-            setNewUserUsername('')
-            setNewUserEmail('')
-            setNewUserPassword('')
-            setNewUserFullName('')
-            setNewUserRole('front_desk')
             fetchUsers()
+            return true
         } catch (err: any) {
             showToast(err.message || 'Failed to create staff account.', 'error')
+            return false
         }
     }
 
@@ -365,20 +339,13 @@ export default function AdminHub() {
         })
     }
 
-    async function handleAdminChangePassword(e: React.FormEvent) {
-        e.preventDefault()
-        if (!editingPasswordUser || !adminNewPassword.trim()) return
-
-        try {
-            // Note: Updating another user's password requires Supabase Admin API keys (service role). 
-            // For client-side admin usage, we update metadata or prompt secure reset email.
-            // Alternatively, we use an edge function or notify success.
-            showToast('Password reset instructions or update requested.', 'success')
-            setEditingPasswordUser(null)
-            setAdminNewPassword('')
-        } catch (err: any) {
-            showToast(err.message || 'Failed to update password.', 'error')
-        }
+    async function handleAdminPasswordSubmit(newPassword: string): Promise<boolean> {
+        void newPassword
+        // Note: Updating another user's password requires Supabase Admin API keys (service role).
+        // For client-side admin usage, we update metadata or prompt secure reset email.
+        // Alternatively, we use an edge function or notify success.
+        showToast('Password reset instructions or update requested.', 'success')
+        return true
     }
 
     async function handleDeleteUser(userId: string, name: string) {
@@ -404,52 +371,42 @@ export default function AdminHub() {
         })
     }
 
-    async function handleUpdateSettings(e: React.FormEvent) {
-        e.preventDefault()
-        if (!currentUserId) return
+    async function handleSettingsSave(payload: AccountSettingsPayload): Promise<{ ok: boolean; error?: string }> {
+        if (!currentUserId) return { ok: false, error: 'Not authenticated.' }
 
         try {
             const { error: profileError } = await supabase
                 .from('users')
-                .update({ full_name: settingsFullName })
+                .update({ full_name: payload.fullName })
                 .eq('id', currentUserId)
 
             if (profileError) throw profileError
 
-            if (newPassword.trim()) {
-                if (!oldPassword.trim()) {
-                    showToast('Please enter your current (old) password to change passwords.', 'error')
-                    return
-                }
-                if (newPassword !== confirmNewPassword) {
-                    showToast('New passwords do not match.', 'error')
-                    return
+            if (payload.newPassword.trim()) {
+                if (!payload.oldPassword.trim()) {
+                    return { ok: false, error: 'Please enter your current (old) password to change passwords.' }
                 }
 
                 const { error: signInError } = await supabase.auth.signInWithPassword({
                     email: currentUserEmail,
-                    password: oldPassword.trim(),
+                    password: payload.oldPassword.trim(),
                 })
 
                 if (signInError) {
-                    showToast('Incorrect old password provided.', 'error')
-                    return
+                    return { ok: false, error: 'Incorrect old password provided.' }
                 }
 
                 const { error: passwordError } = await supabase.auth.updateUser({
-                    password: newPassword.trim(),
+                    password: payload.newPassword.trim(),
                 })
                 if (passwordError) throw passwordError
-
-                setOldPassword('')
-                setNewPassword('')
-                setConfirmNewPassword('')
             }
 
+            setSettingsFullName(payload.fullName)
             showToast('Admin settings & security updated successfully!', 'success')
-            setShowSettingsModal(false)
+            return { ok: true }
         } catch (err: any) {
-            showToast(err.message || 'Failed to update settings.', 'error')
+            return { ok: false, error: err.message || 'Failed to update settings.' }
         }
     }
 
@@ -544,7 +501,7 @@ export default function AdminHub() {
             a.click()
             document.body.removeChild(a)
             URL.revokeObjectURL(blobUrl)
-        } catch (err) {
+        } catch {
             window.open(url, '_blank')
         }
     }
@@ -575,447 +532,98 @@ export default function AdminHub() {
 
     const filteredUsers = users.filter(u => userRoleFilter === 'all' || u.role === userRoleFilter)
 
+    const summaryCards = [
+        { label: 'Total Fleet Intake Cost', value: totalFleetIntakeCost, color: 'text-rose-400' },
+        { label: 'Total Repair Outlay', value: totalFleetRepairCost, color: 'text-amber-400' },
+        { label: 'Total Market Value', value: totalFleetMarketValue, color: 'text-blue-400' },
+        { label: 'Projected Net Profit', value: totalProjectedProfit, color: 'text-emerald-400' },
+    ]
+
+    const tabCounts: Record<string, number> = {
+        vehicles: vehicles.length,
+        users: users.length,
+        banks: banks.length,
+        trash: deletedVehicles.length,
+    }
+
     return (
         <div className={`min-h-screen pb-16 relative selection:bg-purple-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
-            {toast && (
-                <div className="fixed top-6 right-6 z-50 animate-bounce">
-                    <div className={`px-5 py-3 rounded-2xl shadow-2xl text-xs font-bold flex items-center gap-3 border ${toast.type === 'success'
-                            ? isDark
-                                ? 'bg-emerald-950 text-emerald-200 border-emerald-700/80 shadow-emerald-950/50'
-                                : 'bg-emerald-100 text-emerald-800 border-emerald-300 shadow-emerald-100/60'
-                            : isDark
-                                ? 'bg-rose-950 text-rose-200 border-rose-700/80 shadow-rose-950/50'
-                                : 'bg-rose-100 text-rose-800 border-rose-300 shadow-rose-100/60'
-                        }`}>
-                        <span>{toast.type === 'success' ? '✨' : '⚠️'}</span>
-                        <span>{toast.message}</span>
-                    </div>
-                </div>
-            )}
+            {toast && <Toast message={toast.message} type={toast.type} isDark={isDark} />}
 
-            {/* Confirmation Modal */}
             {confirmModal && (
-                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                    <div className={`border rounded-3xl shadow-2xl max-w-sm w-full p-6 text-center ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
-                        <div className={`w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center text-xl font-bold border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>
-                            {confirmModal.confirmVariant === 'danger' ? '⚠️' : confirmModal.confirmVariant === 'success' ? '✅' : '❓'}
-                        </div>
-                        <h3 className={`text-lg font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>{confirmModal.title}</h3>
-                        <p className={`text-xs mt-2 font-medium leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{confirmModal.message}</p>
-
-                        <div className="flex gap-3 mt-6">
-                            <button
-                                type="button"
-                                onClick={() => setConfirmModal(null)}
-                                className={`w-1/2 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${isDark ? 'text-slate-300 bg-slate-800 hover:bg-slate-700 border-slate-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200'}`}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={confirmModal.onConfirm}
-                                className={`w-1/2 py-2.5 rounded-xl text-xs font-bold text-white shadow-md transition-all cursor-pointer ${confirmModal.confirmVariant === 'danger'
-                                        ? 'bg-rose-600 hover:bg-rose-500'
-                                        : confirmModal.confirmVariant === 'success'
-                                            ? 'bg-emerald-600 hover:bg-emerald-500'
-                                            : 'bg-blue-600 hover:bg-blue-500'
-                                    }`}
-                            >
-                                {confirmModal.confirmText || 'Confirm'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <ConfirmModal
+                    title={confirmModal.title}
+                    message={confirmModal.message}
+                    confirmText={confirmModal.confirmText}
+                    confirmVariant={confirmModal.confirmVariant}
+                    onConfirm={confirmModal.onConfirm}
+                    onCancel={() => setConfirmModal(null)}
+                    isDark={isDark}
+                />
             )}
+
+            <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} isDark={isDark} />
 
             {/* Add Staff User Modal */}
             {showUserModal && (
-                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                    <div className={`border rounded-3xl shadow-2xl max-w-md w-full p-8 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
-                        <div className="flex justify-between items-center mb-6">
-                            <div>
-                                <h3 className={`text-lg font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>Register New Staff Member</h3>
-                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Create credentials and assign initial operational permissions.</p>
-                            </div>
-                            <button onClick={() => setShowUserModal(false)} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}>&times;</button>
-                        </div>
-
-                        <form onSubmit={handleCreateStaffUser} className="space-y-4">
-                            <div>
-                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Full Name *</label>
-                                <input
-                                    type="text"
-                                    required
-                                    placeholder="e.g. Ahmad bin Ali"
-                                    value={newUserFullName}
-                                    onChange={(e) => setNewUserFullName(e.target.value)}
-                                    className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                                />
-                            </div>
-
-                            <div>
-                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Username *</label>
-                                <input
-                                    type="text"
-                                    required
-                                    placeholder="e.g. ahmad"
-                                    value={newUserUsername}
-                                    onChange={(e) => setNewUserUsername(e.target.value)}
-                                    className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                                />
-                            </div>
-
-                            <div>
-                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Staff Email *</label>
-                                <input
-                                    type="email"
-                                    required
-                                    placeholder="staff@workshop.com"
-                                    value={newUserEmail}
-                                    onChange={(e) => setNewUserEmail(e.target.value)}
-                                    className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                                />
-                            </div>
-
-                            <div>
-                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Temporary Password *</label>
-                                <input
-                                    type="password"
-                                    required
-                                    placeholder="••••••••"
-                                    value={newUserPassword}
-                                    onChange={(e) => setNewUserPassword(e.target.value)}
-                                    className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                                />
-                            </div>
-
-                            <div>
-                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Role Assignment *</label>
-                                <select
-                                    value={newUserRole}
-                                    onChange={(e) => setNewUserRole(e.target.value)}
-                                    className={`w-full border rounded-xl p-3 text-xs font-bold focus:ring-2 focus:ring-purple-500 focus:outline-none cursor-pointer capitalize ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                                >
-                                    <option value="front_desk">Front Desk</option>
-                                    <option value="technician">Technician</option>
-                                    <option value="admin">Administrator</option>
-                                    <option value="bidder">Bidder</option>
-                                </select>
-                            </div>
-
-                            <div className="flex justify-end gap-3 pt-4">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowUserModal(false)}
-                                    className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${isDark ? 'text-slate-300 bg-slate-800 hover:bg-slate-700 border-slate-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200'}`}
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
-                                >
-                                    Create Staff Account
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+                <StaffUserModal
+                    isDark={isDark}
+                    onSubmit={handleCreateStaffUser}
+                    onClose={() => setShowUserModal(false)}
+                />
             )}
 
             {/* Admin Change Staff Password Modal */}
             {editingPasswordUser && (
-                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                    <div className={`border rounded-3xl shadow-2xl max-w-sm w-full p-6 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
-                        <h3 className={`text-base font-extrabold mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>Change Password</h3>
-                        <p className={`text-xs mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Update password for: <span className="font-bold">{editingPasswordUser.full_name}</span></p>
-
-                        <form onSubmit={handleAdminChangePassword} className="space-y-4">
-                            <div>
-                                <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>New Password *</label>
-                                <div className="relative">
-                                    <input
-                                        type={showAdminNewPassword ? 'text' : 'password'}
-                                        required
-                                        placeholder="••••••••"
-                                        value={adminNewPassword}
-                                        onChange={(e) => setAdminNewPassword(e.target.value)}
-                                        className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                                    />
-                                    <button type="button" onClick={() => setShowAdminNewPassword(!showAdminNewPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-purple-500 cursor-pointer">
-                                        {showAdminNewPassword ? '🙈' : '👁️'}
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="flex justify-end gap-3 pt-2">
-                                <button
-                                    type="button"
-                                    onClick={() => { setEditingPasswordUser(null); setAdminNewPassword(''); }}
-                                    className={`px-4 py-2 rounded-xl text-xs font-bold border cursor-pointer ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-600'}`}
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer"
-                                >
-                                    Update Password
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+                <ChangePasswordModal
+                    isDark={isDark}
+                    userName={editingPasswordUser.full_name}
+                    onSubmit={handleAdminPasswordSubmit}
+                    onClose={() => setEditingPasswordUser(null)}
+                />
             )}
 
             {/* Add / Edit Bank Modal */}
             {showBankModal && (
-                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                    <div className={`border rounded-3xl shadow-2xl max-w-md w-full p-8 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className={`text-lg font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                                {editingBank ? 'Edit Bank Policy' : 'Add New Panel Bank'}
-                            </h3>
-                            <button onClick={() => setShowBankModal(false)} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}>&times;</button>
-                        </div>
-
-                        <form onSubmit={handleSaveBank} className="space-y-4">
-                            <div>
-                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Bank Name *</label>
-                                <input
-                                    type="text"
-                                    required
-                                    placeholder="e.g. Maybank / CIMB"
-                                    value={bankNameInput}
-                                    onChange={(e) => setBankNameInput(e.target.value)}
-                                    className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                                />
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3 pt-2">
-                                <label className={`flex items-center gap-2.5 p-3 rounded-2xl border cursor-pointer ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                    <input
-                                        type="checkbox"
-                                        checked={bankAcceptsBer}
-                                        onChange={(e) => setBankAcceptsBer(e.target.checked)}
-                                        className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
-                                    />
-                                    <span className="text-xs font-bold">Accepts BER</span>
-                                </label>
-                                <label className={`flex items-center gap-2.5 p-3 rounded-2xl border cursor-pointer ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                    <input
-                                        type="checkbox"
-                                        checked={bankAcceptsRefinance}
-                                        onChange={(e) => setBankAcceptsRefinance(e.target.checked)}
-                                        className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
-                                    />
-                                    <span className="text-xs font-bold">Accepts Refinance</span>
-                                </label>
-                            </div>
-
-                            <div>
-                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Internal Admin Notes / Criteria</label>
-                                <textarea
-                                    rows={3}
-                                    placeholder="e.g. Requires 3 months seasoning and original grant..."
-                                    value={bankNotesInput}
-                                    onChange={(e) => setBankNotesInput(e.target.value)}
-                                    className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                                />
-                            </div>
-
-                            <div className="flex justify-end gap-3 pt-4">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowBankModal(false)}
-                                    className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${isDark ? 'text-slate-300 bg-slate-800 hover:bg-slate-700 border-slate-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200'}`}
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
-                                >
-                                    Save Bank Record
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+                <BankModal
+                    isDark={isDark}
+                    editingBank={editingBank}
+                    onSubmit={handleSaveBank}
+                    onClose={() => { setShowBankModal(false); setEditingBank(null); }}
+                />
             )}
 
             {/* Settings Modal */}
             {showSettingsModal && (
-                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto py-10">
-                    <div className={`border rounded-3xl shadow-2xl max-w-md w-full p-8 max-h-[90vh] overflow-y-auto ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-900'}`}>
-                        <div className="flex justify-between items-center mb-6">
-                            <div>
-                                <h3 className={`text-xl font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>Admin Account Settings</h3>
-                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Manage appearance, profile, and master credentials.</p>
-                            </div>
-                            <button onClick={() => setShowSettingsModal(false)} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}>&times;</button>
-                        </div>
-
-                        <form onSubmit={handleUpdateSettings} className="space-y-4">
-                            <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                <label className={`block text-[11px] font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Interface Theme Mode</label>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setTheme('light')}
-                                        className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${theme === 'light' ? 'bg-purple-600 text-white border-purple-500 shadow-md' : isDark ? 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
-                                    >
-                                        ☀️ Day Mode
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setTheme('dark')}
-                                        className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${theme === 'dark' ? 'bg-purple-600 text-white border-purple-500 shadow-md' : isDark ? 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
-                                    >
-                                        🌙 Night Mode
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div>
-                                    <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Email (Locked)</label>
-                                    <input type="text" disabled value={currentUserEmail} className={`w-full border rounded-xl p-3 text-xs font-medium cursor-not-allowed ${isDark ? 'bg-slate-950 border-slate-800 text-slate-500' : 'bg-slate-100 border-slate-200 text-slate-500'}`} />
-                                </div>
-                                <div>
-                                    <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Username (Locked)</label>
-                                    <input type="text" disabled value={settingsUsername} className={`w-full border rounded-xl p-3 text-xs font-medium cursor-not-allowed ${isDark ? 'bg-slate-950 border-slate-800 text-slate-500' : 'bg-slate-100 border-slate-200 text-slate-500'}`} />
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Full Name *</label>
-                                <input type="text" required value={settingsFullName} onChange={(e) => setSettingsFullName(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`} />
-                            </div>
-
-                            <div className={`pt-4 border-t space-y-3 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                                <h4 className={`text-xs font-black uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Change Password (Optional)</h4>
-
-                                <div>
-                                    <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Current Password</label>
-                                    <div className="relative">
-                                        <input
-                                            type={showOldPassword ? 'text' : 'password'}
-                                            placeholder="••••••••"
-                                            value={oldPassword}
-                                            onChange={(e) => setOldPassword(e.target.value)}
-                                            className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                                        />
-                                        <button type="button" onClick={() => setShowOldPassword(!showOldPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-purple-500 cursor-pointer">
-                                            {showOldPassword ? '🙈' : '👁️'}
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>New Password</label>
-                                    <div className="relative">
-                                        <input
-                                            type={showNewPassword ? 'text' : 'password'}
-                                            placeholder="••••••••"
-                                            value={newPassword}
-                                            onChange={(e) => setNewPassword(e.target.value)}
-                                            className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                                        />
-                                        <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-purple-500 cursor-pointer">
-                                            {showNewPassword ? '🙈' : '👁️'}
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Confirm New Password</label>
-                                    <div className="relative">
-                                        <input
-                                            type={showConfirmPassword ? 'text' : 'password'}
-                                            placeholder="••••••••"
-                                            value={confirmNewPassword}
-                                            onChange={(e) => setConfirmNewPassword(e.target.value)}
-                                            className={`w-full border rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                                        />
-                                        <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-purple-500 cursor-pointer">
-                                            {showConfirmPassword ? '🙈' : '👁️'}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className={`flex justify-end gap-3 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                                <button type="button" onClick={() => setShowSettingsModal(false)} className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${isDark ? 'text-slate-300 bg-slate-800 hover:bg-slate-700 border-slate-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200'}`}>Cancel</button>
-                                <button type="submit" className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer">Save Changes</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Media Preview Modal */}
-            {previewMedia && (
-                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-                    <div className={`border rounded-3xl shadow-2xl max-w-3xl w-full p-6 flex flex-col max-h-[90vh] ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
-                        <div className={`flex justify-between items-center pb-4 border-b ${isDark ? 'border-slate-800 text-white' : 'border-slate-200 text-slate-900'}`}>
-                            <h3 className="text-base font-extrabold truncate">{previewMedia.title}</h3>
-                            <button
-                                onClick={() => setPreviewMedia(null)}
-                                className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
-                            >
-                                &times;
-                            </button>
-                        </div>
-
-                        <div className={`py-4 flex-1 overflow-auto flex items-center justify-center rounded-2xl my-4 border p-2 ${isDark ? 'bg-slate-950 border-slate-800/80' : 'bg-slate-50 border-slate-200'}`}>
-                            <img
-                                src={previewMedia.url}
-                                alt={previewMedia.title}
-                                className="max-h-[60vh] w-auto object-contain rounded-xl shadow-md"
-                            />
-                        </div>
-
-                        <div className={`flex flex-wrap justify-end gap-3 pt-2 border-t ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
-                            <button
-                                onClick={() => handleDownload(previewMedia.url, previewMedia.title)}
-                                className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
-                            >
-                                💾 Save File
-                            </button>
-                            <a
-                                href={previewMedia.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5"
-                            >
-                                ↗️ Open in New Tab
-                            </a>
-                            <button
-                                onClick={() => setPreviewMedia(null)}
-                                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
-                            >
-                                Close
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <AccountSettingsModal
+                    isDark={isDark}
+                    theme={theme}
+                    setTheme={setTheme}
+                    title="Admin Account Settings"
+                    subtitle="Manage appearance, profile, and master credentials."
+                    email={currentUserEmail}
+                    username={settingsUsername}
+                    fullName={settingsFullName}
+                    accent="purple"
+                    onClose={() => setShowSettingsModal(false)}
+                    onSave={handleSettingsSave}
+                />
             )}
 
             {/* Header */}
             <header className={`border-b sticky top-0 z-20 shadow-lg backdrop-blur-md ${isDark ? 'bg-slate-950/90 border-slate-800 text-white' : 'bg-white/90 border-slate-200 text-slate-900'}`}>
-                <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-2xl bg-purple-600/20 border border-purple-500/40 flex items-center justify-center text-purple-400 font-black text-base">
                             👑
                         </div>
                         <div>
                             <h1 className="text-base font-extrabold tracking-tight">System Admin Control Hub</h1>
-                            <p className={`text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Master Supervision, Financials & Staff Governance</p>
+                            <p className={`text-[11px] font-medium hidden sm:block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Master Supervision, Financials & Staff Governance</p>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                         <button
                             onClick={() => setTheme(isDark ? 'light' : 'dark')}
                             className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-amber-600 border-slate-200'}`}
@@ -1051,100 +659,59 @@ export default function AdminHub() {
                 </div>
             </header>
 
-            <main className="max-w-7xl mx-auto px-6 py-8">
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
                 {/* Financial Fleet Summary Analytics Bar */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-                    <div className={`border rounded-3xl p-5 shadow-lg ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
-                        <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Total Fleet Intake Cost</p>
-                        <p className="text-xl font-black text-rose-400">RM {totalFleetIntakeCost.toLocaleString()}</p>
-                    </div>
-                    <div className={`border rounded-3xl p-5 shadow-lg ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
-                        <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Total Repair Outlay</p>
-                        <p className="text-xl font-black text-amber-400">RM {totalFleetRepairCost.toLocaleString()}</p>
-                    </div>
-                    <div className={`border rounded-3xl p-5 shadow-lg ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
-                        <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Total Market Value</p>
-                        <p className="text-xl font-black text-blue-400">RM {totalFleetMarketValue.toLocaleString()}</p>
-                    </div>
-                    <div className={`border rounded-3xl p-5 shadow-lg ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
-                        <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Projected Net Profit</p>
-                        <p className="text-xl font-black text-emerald-400">RM {totalProjectedProfit.toLocaleString()}</p>
-                    </div>
+                    {summaryCards.map((s) => (
+                        <Card key={s.label} isDark={isDark} className="p-5 shadow-lg">
+                            <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">{s.label}</p>
+                            <p className={`text-xl font-black ${s.color}`}>RM {s.value.toLocaleString()}</p>
+                        </Card>
+                    ))}
                 </div>
 
                 {/* Navigation Tabs */}
                 <div className={`flex flex-wrap gap-3 mb-8 border-b pb-4 ${isDark ? 'border-slate-800/40' : 'border-slate-200'}`}>
-                    <button
-                        onClick={() => { setActiveTab('vehicles'); setSelectedVehicle(null); }}
-                        className={`px-5 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer border ${activeTab === 'vehicles'
-                                ? 'bg-purple-600 text-white border-purple-500 shadow-md'
-                                : isDark ? 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                            }`}
-                    >
-                        🚗 Vehicle Master Registry ({vehicles.length})
-                    </button>
-                    <button
-                        onClick={() => { setActiveTab('users'); setSelectedVehicle(null); }}
-                        className={`px-5 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer border ${activeTab === 'users'
-                                ? 'bg-purple-600 text-white border-purple-500 shadow-md'
-                                : isDark ? 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                            }`}
-                    >
-                        👥 Staff & User Management ({users.length})
-                    </button>
-                    <button
-                        onClick={() => { setActiveTab('banks'); setSelectedVehicle(null); }}
-                        className={`px-5 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer border ${activeTab === 'banks'
-                                ? 'bg-purple-600 text-white border-purple-500 shadow-md'
-                                : isDark ? 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                            }`}
-                    >
-                        🏦 Panel Bank Criteria ({banks.length})
-                    </button>
-                    <button
-                        onClick={() => { setActiveTab('trash'); setSelectedVehicle(null); }}
-                        className={`px-5 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer border ${activeTab === 'trash'
-                                ? 'bg-purple-600 text-white border-purple-500 shadow-md'
-                                : isDark ? 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                            }`}
-                    >
-                        🗑️ Trash / Recovery ({deletedVehicles.length})
-                    </button>
+                    {TABS.map((tab) => (
+                        <button
+                            key={tab.key}
+                            onClick={() => { setActiveTab(tab.key); setSelectedVehicle(null); }}
+                            className={`px-5 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer border ${activeTab === tab.key
+                                    ? 'bg-purple-600 text-white border-purple-500 shadow-md'
+                                    : isDark ? 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                                }`}
+                        >
+                            {tab.label} ({tabCounts[tab.key]})
+                        </button>
+                    ))}
                 </div>
 
                 {/* TAB 1: VEHICLES MANAGEMENT */}
                 {activeTab === 'vehicles' && !selectedVehicle && (
                     <div>
-                        <div className="flex justify-between items-center mb-6">
-                            <div>
-                                <h2 className={`text-xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Vehicle Fleet Supervisory Registry</h2>
-                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Click any vehicle to inspect financials, technician before/after photo evidence, and perform status overrides.</p>
-                            </div>
-                        </div>
+                        <SectionHeading
+                            isDark={isDark}
+                            title="Vehicle Fleet Supervisory Registry"
+                            subtitle="Click any vehicle to inspect financials, technician before/after photo evidence, and perform status overrides."
+                        />
 
                         {loading ? (
-                            <div className="p-16 text-center text-slate-500 font-medium">Loading fleet database...</div>
+                            <EmptyState isDark={isDark} message="Loading fleet database..." />
                         ) : vehicles.length === 0 ? (
-                            <div className={`p-16 text-center rounded-3xl border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-600'}`}>
-                                No vehicles found in the master registry.
-                            </div>
+                            <EmptyState isDark={isDark} message="No vehicles found in the master registry." />
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                                 {vehicles.map((v) => (
-                                    <div
+                                    <Card
                                         key={v.id}
+                                        isDark={isDark}
                                         onClick={() => selectVehicle(v)}
-                                        className={`border rounded-3xl p-6 cursor-pointer transition-all hover:shadow-xl flex flex-col justify-between ${isDark
-                                                ? 'bg-slate-950 border-slate-800 hover:border-purple-500/80'
-                                                : 'bg-white border-slate-200 hover:border-purple-500/80 hover:shadow-md'
-                                            }`}
+                                        className="p-6 cursor-pointer transition-all hover:shadow-xl flex flex-col justify-between hover:border-purple-500/80"
                                     >
                                         <div>
-                                            <div className="flex justify-between items-start mb-3">
+                                            <div className="flex justify-between items-start gap-2 mb-3">
                                                 <h3 className={`text-lg font-black tracking-tight ${isDark ? 'text-white' : 'text-blue-950'}`}>{v.plate_number}</h3>
-                                                <span className="px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-purple-950 text-purple-300 border border-purple-800/60">
-                                                    {v.status.replace(/_/g, ' ')}
-                                                </span>
+                                                <StatusBadge status={v.status} />
                                             </div>
                                             <p className={`text-xs font-semibold mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{v.make_model_year}</p>
 
@@ -1176,7 +743,7 @@ export default function AdminHub() {
                                                 🗑️
                                             </button>
                                         </div>
-                                    </div>
+                                    </Card>
                                 ))}
                             </div>
                         )}
@@ -1193,19 +760,17 @@ export default function AdminHub() {
                             &larr; Back to Fleet Registry
                         </button>
 
-                        <div className={`rounded-3xl border p-8 mb-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                        <Card isDark={isDark} className="p-5 sm:p-8 mb-8 shadow-xl">
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                                 <div>
-                                    <div className="flex items-center gap-3">
-                                        <h2 className="text-3xl font-black tracking-tight">{selectedVehicle.plate_number}</h2>
-                                        <span className="px-3.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-purple-950 text-purple-300 border border-purple-800/60">
-                                            {selectedVehicle.status.replace(/_/g, ' ')}
-                                        </span>
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <h2 className="text-2xl sm:text-3xl font-black tracking-tight">{selectedVehicle.plate_number}</h2>
+                                        <StatusBadge status={selectedVehicle.status} />
                                     </div>
                                     <p className="text-xs font-semibold text-slate-400 mt-1">{selectedVehicle.make_model_year} • VIN: {selectedVehicle.chassis_number}</p>
                                 </div>
 
-                                <div className={`p-4 rounded-2xl border flex items-center gap-3 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center gap-3 w-full md:w-auto ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                     <span className="text-xs font-black uppercase text-purple-400">Admin Override Status:</span>
                                     <select
                                         value={selectedVehicle.status}
@@ -1219,68 +784,26 @@ export default function AdminHub() {
                                     </select>
                                 </div>
                             </div>
-                        </div>
+                        </Card>
 
                         <div className="space-y-8">
-                            <div className={`rounded-3xl border p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
-                                <h3 className={`text-sm font-extrabold uppercase tracking-wider mb-6 pb-4 border-b ${isDark ? 'border-slate-800/50' : 'border-slate-200'}`}>
-                                    Technician "Before" Photos ({mediaItems.filter(m => m.media_type === 'photo_before').length}/8 Captured)
-                                </h3>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                                    {PHOTO_CATEGORIES.map((cat) => {
-                                        const uploaded = mediaItems.find(m => m.category === cat.key && m.media_type === 'photo_before')
-                                        return (
-                                            <div key={cat.key} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                                <div>
-                                                    <p className="text-xs font-extrabold uppercase tracking-wider mb-1">{cat.label}</p>
-                                                    <p className={`text-xs font-semibold mb-4 ${uploaded ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                        {uploaded ? '✓ Captured' : 'Missing'}
-                                                    </p>
-                                                </div>
-                                                {uploaded && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setPreviewMedia({ url: uploaded.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })}
-                                                        className={`w-full text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-600 border-slate-200'}`}
-                                                    >
-                                                        View Photo
-                                                    </button>
-                                                )}
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            </div>
+                            <VehicleAuditGrid
+                                isDark={isDark}
+                                title={`Technician "Before" Photos (${mediaItems.filter(m => m.media_type === 'photo_before').length}/8 Captured)`}
+                                mediaItems={mediaItems}
+                                phase="before"
+                                vehiclePlate={selectedVehicle.plate_number}
+                                onView={(url, title) => setPreviewMedia({ url, title })}
+                            />
 
-                            <div className={`rounded-3xl border p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
-                                <h3 className={`text-sm font-extrabold uppercase tracking-wider mb-6 pb-4 border-b ${isDark ? 'border-slate-800/50' : 'border-slate-200'}`}>
-                                    Technician "After" Photos ({mediaItems.filter(m => m.media_type === 'photo_after').length}/8 Captured)
-                                </h3>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                                    {PHOTO_CATEGORIES.map((cat) => {
-                                        const uploaded = mediaItems.find(m => m.category === cat.key && m.media_type === 'photo_after')
-                                        return (
-                                            <div key={cat.key} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                                <div>
-                                                    <p className="text-xs font-extrabold uppercase tracking-wider mb-1">{cat.label}</p>
-                                                    <p className={`text-xs font-semibold mb-4 ${uploaded ? 'text-blue-400' : 'text-slate-500'}`}>
-                                                        {uploaded ? '✓ Captured' : 'Pending / Not Yet Captured'}
-                                                    </p>
-                                                </div>
-                                                {uploaded && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setPreviewMedia({ url: uploaded.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })}
-                                                        className={`w-1/2 text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-blue-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-blue-600 border-slate-200'}`}
-                                                    >
-                                                        View Photo
-                                                    </button>
-                                                )}
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            </div>
+                            <VehicleAuditGrid
+                                isDark={isDark}
+                                title={`Technician "After" Photos (${mediaItems.filter(m => m.media_type === 'photo_after').length}/8 Captured)`}
+                                mediaItems={mediaItems}
+                                phase="after"
+                                vehiclePlate={selectedVehicle.plate_number}
+                                onView={(url, title) => setPreviewMedia({ url, title })}
+                            />
                         </div>
                     </div>
                 )}
@@ -1288,21 +811,22 @@ export default function AdminHub() {
                 {/* TAB 2: USER & STAFF MANAGEMENT */}
                 {activeTab === 'users' && (
                     <div>
-                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-                            <div>
-                                <h2 className={`text-xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Staff Account & Role Governance</h2>
-                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Register new staff, suspend accounts, change passwords, and monitor activity.</p>
-                            </div>
-                            <button
-                                onClick={() => setShowUserModal(true)}
-                                className="bg-purple-600 hover:bg-purple-500 text-white px-5 py-2.5 rounded-2xl text-xs font-bold shadow-lg transition-all cursor-pointer"
-                            >
-                                + Register New Staff
-                            </button>
-                        </div>
+                        <SectionHeading
+                            isDark={isDark}
+                            title="Staff Account & Role Governance"
+                            subtitle="Register new staff, suspend accounts, change passwords, and monitor activity."
+                            right={
+                                <button
+                                    onClick={() => setShowUserModal(true)}
+                                    className="bg-purple-600 hover:bg-purple-500 text-white px-5 py-2.5 rounded-2xl text-xs font-bold shadow-lg transition-all cursor-pointer"
+                                >
+                                    + Register New Staff
+                                </button>
+                            }
+                        />
 
-                        <div className="flex gap-2 mb-6">
-                            {(['all', 'admin', 'front_desk', 'technician'] as const).map((roleKey) => (
+                        <div className="flex flex-wrap gap-2 mb-6">
+                            {ROLE_FILTERS.map((roleKey) => (
                                 <button
                                     key={roleKey}
                                     onClick={() => setUserRoleFilter(roleKey)}
@@ -1316,116 +840,113 @@ export default function AdminHub() {
                             ))}
                         </div>
 
-                        <div className={`rounded-3xl border overflow-hidden shadow-xl ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left border-collapse">
-                                    <thead>
-                                        <tr className={`border-b text-xs font-extrabold uppercase tracking-wider ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700'}`}>
-                                            <th className="p-4">Full Name & Username</th>
-                                            <th className="p-4">Status</th>
-                                            <th className="p-4">Role</th>
-                                            <th className="p-4">Last Login</th>
-                                            <th className="p-4 text-right">Actions</th>
+                        <ResponsiveTable isDark={isDark} minWidth="min-w-[760px]">
+                            <thead>
+                                <tr className={`border-b text-xs font-extrabold uppercase tracking-wider ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700'}`}>
+                                    <th className="p-4">Full Name & Username</th>
+                                    <th className="p-4">Status</th>
+                                    <th className="p-4">Role</th>
+                                    <th className="p-4">Last Login</th>
+                                    <th className="p-4 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
+                                {filteredUsers.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={5} className="p-12 text-center text-slate-500">No staff accounts found matching this filter.</td>
+                                    </tr>
+                                ) : (
+                                    filteredUsers.map((u) => (
+                                        <tr key={u.id} className={`transition-colors ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
+                                            <td className="p-4">
+                                                <p className={`font-black text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{u.full_name || 'N/A'}</p>
+                                                <p className="text-slate-400 text-[11px] font-mono mt-0.5">@{u.username} {u.email ? `• ${u.email}` : ''}</p>
+                                            </td>
+                                            <td className="p-4">
+                                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${u.is_suspended
+                                                        ? 'bg-rose-950 text-rose-300 border-rose-800'
+                                                        : 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                                                    }`}>
+                                                    {u.is_suspended ? 'Suspended' : 'Active'}
+                                                </span>
+                                            </td>
+                                            <td className="p-4">
+                                                <select
+                                                    value={u.role}
+                                                    onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
+                                                    className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer capitalize ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                                                >
+                                                    <option value="admin">Administrator</option>
+                                                    <option value="front_desk">Front Desk</option>
+                                                    <option value="technician">Technician</option>
+                                                    <option value="bidder">Bidder</option>
+                                                </select>
+                                            </td>
+                                            <td className="p-4 text-slate-400 text-[11px]">
+                                                {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never logged in'}
+                                            </td>
+                                            <td className="p-4 text-right">
+                                                <div className="flex flex-wrap gap-2 justify-end">
+                                                    <button
+                                                        onClick={() => setEditingPasswordUser(u)}
+                                                        className="bg-purple-950 hover:bg-purple-900 text-purple-300 px-3 py-2 rounded-xl text-xs font-bold border border-purple-800 cursor-pointer transition-colors"
+                                                        title="Change Password"
+                                                    >
+                                                        🔑 Password
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleToggleSuspendUser(u.id, Boolean(u.is_suspended), u.full_name)}
+                                                        className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${u.is_suspended
+                                                                ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800'
+                                                                : 'bg-amber-950 hover:bg-amber-900 text-amber-300 border-amber-800'
+                                                            }`}
+                                                        title={u.is_suspended ? 'Reactivate Account' : 'Suspend Account'}
+                                                    >
+                                                        {u.is_suspended ? '🟢 Activate' : '🟡 Suspend'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteUser(u.id, u.full_name)}
+                                                        className="bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer transition-colors"
+                                                        title="Remove Account"
+                                                    >
+                                                        🗑️
+                                                    </button>
+                                                </div>
+                                            </td>
                                         </tr>
-                                    </thead>
-                                    <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
-                                        {filteredUsers.length === 0 ? (
-                                            <tr>
-                                                <td colSpan={5} className="p-12 text-center text-slate-500">No staff accounts found matching this filter.</td>
-                                            </tr>
-                                        ) : (
-                                            filteredUsers.map((u) => (
-                                                <tr key={u.id} className={`transition-colors ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
-                                                    <td className="p-4">
-                                                        <p className={`font-black text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{u.full_name || 'N/A'}</p>
-                                                        <p className="text-slate-400 text-[11px] font-mono mt-0.5">@{u.username} {u.email ? `• ${u.email}` : ''}</p>
-                                                    </td>
-                                                    <td className="p-4">
-                                                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${u.is_suspended
-                                                                ? 'bg-rose-950 text-rose-300 border-rose-800'
-                                                                : 'bg-emerald-950 text-emerald-300 border-emerald-800'
-                                                            }`}>
-                                                            {u.is_suspended ? 'Suspended' : 'Active'}
-                                                        </span>
-                                                    </td>
-                                                    <td className="p-4">
-                                                        <select
-                                                            value={u.role}
-                                                            onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
-                                                            className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer capitalize ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
-                                                        >
-                                                            <option value="admin">Administrator</option>
-                                                            <option value="front_desk">Front Desk</option>
-                                                            <option value="technician">Technician</option>
-                                                            <option value="bidder">Bidder</option>
-                                                        </select>
-                                                    </td>
-                                                    <td className="p-4 text-slate-400 text-[11px]">
-                                                        {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never logged in'}
-                                                    </td>
-                                                    <td className="p-4 text-right space-x-2">
-                                                        <button
-                                                            onClick={() => setEditingPasswordUser(u)}
-                                                            className="bg-purple-950 hover:bg-purple-900 text-purple-300 px-3 py-2 rounded-xl text-xs font-bold border border-purple-800 cursor-pointer transition-colors"
-                                                            title="Change Password"
-                                                        >
-                                                            🔑 Password
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleToggleSuspendUser(u.id, Boolean(u.is_suspended), u.full_name)}
-                                                            className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${u.is_suspended
-                                                                    ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800'
-                                                                    : 'bg-amber-950 hover:bg-amber-900 text-amber-300 border-amber-800'
-                                                                }`}
-                                                            title={u.is_suspended ? 'Reactivate Account' : 'Suspend Account'}
-                                                        >
-                                                            {u.is_suspended ? '🟢 Activate' : '🟡 Suspend'}
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleDeleteUser(u.id, u.full_name)}
-                                                            className="bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer transition-colors"
-                                                            title="Remove Account"
-                                                        >
-                                                            🗑️
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            ))
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
+                                    ))
+                                )}
+                            </tbody>
+                        </ResponsiveTable>
                     </div>
                 )}
 
                 {/* TAB 3: PANEL BANK CRITERIA */}
                 {activeTab === 'banks' && (
                     <div>
-                        <div className="flex justify-between items-center mb-6">
-                            <div>
-                                <h2 className={`text-xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Panel Bank Criteria Management</h2>
-                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Configure which banks accept BER (Beyond Economic Repair) and Refinance cases.</p>
-                            </div>
-                            <button
-                                onClick={() => { setEditingBank(null); setBankNameInput(''); setBankAcceptsBer(false); setBankAcceptsRefinance(false); setBankNotesInput(''); setShowBankModal(true); }}
-                                className="bg-purple-600 hover:bg-purple-500 text-white px-5 py-2.5 rounded-2xl text-xs font-bold shadow-lg transition-all cursor-pointer"
-                            >
-                                + Add New Bank
-                            </button>
-                        </div>
+                        <SectionHeading
+                            isDark={isDark}
+                            title="Panel Bank Criteria Management"
+                            subtitle="Configure which banks accept BER (Beyond Economic Repair) and Refinance cases."
+                            right={
+                                <button
+                                    onClick={openNewBankModal}
+                                    className="bg-purple-600 hover:bg-purple-500 text-white px-5 py-2.5 rounded-2xl text-xs font-bold shadow-lg transition-all cursor-pointer"
+                                >
+                                    + Add New Bank
+                                </button>
+                            }
+                        />
 
                         {banks.length === 0 ? (
-                            <div className={`p-16 text-center rounded-3xl border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-600'}`}>
-                                No panel banks configured yet. Click "+ Add New Bank" to get started.
-                            </div>
+                            <EmptyState isDark={isDark} message='No panel banks configured yet. Click "+ Add New Bank" to get started.' />
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                                 {banks.map((b) => (
-                                    <div key={b.id} className={`border rounded-3xl p-6 flex flex-col justify-between shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                                    <Card key={b.id} isDark={isDark} className="p-6 flex flex-col justify-between shadow-xl">
                                         <div>
-                                            <h3 className="text-lg font-black tracking-tight mb-3">{b.bank_name}</h3>
-                                            <div className="flex gap-2 mb-4">
+                                            <h3 className={`text-lg font-black tracking-tight mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>{b.bank_name}</h3>
+                                            <div className="flex flex-wrap gap-2 mb-4">
                                                 <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${b.accepts_ber ? 'bg-emerald-950 text-emerald-300 border-emerald-800/60' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>
                                                     {b.accepts_ber ? '✓ Accepts BER' : '✗ No BER'}
                                                 </span>
@@ -1444,7 +965,7 @@ export default function AdminHub() {
                                         >
                                             Edit Bank Criteria &rarr;
                                         </button>
-                                    </div>
+                                    </Card>
                                 ))}
                             </div>
                         )}
@@ -1454,21 +975,18 @@ export default function AdminHub() {
                 {/* TAB 4: TRASH / RECOVERY */}
                 {activeTab === 'trash' && (
                     <div>
-                        <div className="flex justify-between items-center mb-6">
-                            <div>
-                                <h2 className={`text-xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Archived / Deleted Vehicles</h2>
-                                <p className={`text-xs mt-0.5 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Restore accidentally deleted vehicle cases back into the active fleet registry.</p>
-                            </div>
-                        </div>
+                        <SectionHeading
+                            isDark={isDark}
+                            title="Archived / Deleted Vehicles"
+                            subtitle="Restore accidentally deleted vehicle cases back into the active fleet registry."
+                        />
 
                         {deletedVehicles.length === 0 ? (
-                            <div className={`p-16 text-center rounded-3xl border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-600'}`}>
-                                Trash is completely empty.
-                            </div>
+                            <EmptyState isDark={isDark} message="Trash is completely empty." />
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                                 {deletedVehicles.map((v) => (
-                                    <div key={v.id} className={`border rounded-3xl p-6 flex flex-col justify-between ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
+                                    <Card key={v.id} isDark={isDark} className="p-6 flex flex-col justify-between">
                                         <div>
                                             <h3 className={`text-lg font-black tracking-tight mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>{v.plate_number}</h3>
                                             <p className={`text-xs font-semibold mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{v.make_model_year}</p>
@@ -1480,7 +998,7 @@ export default function AdminHub() {
                                         >
                                             Restore Vehicle &rarr;
                                         </button>
-                                    </div>
+                                    </Card>
                                 ))}
                             </div>
                         )}
