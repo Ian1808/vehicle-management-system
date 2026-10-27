@@ -44,6 +44,16 @@ export async function insertVehicle(vehicleData: {
     return true
 }
 
+export async function updateVehicleStatus(vehicleId: string, newStatus: string) {
+    const { error } = await supabase
+        .from('vehicles')
+        .update({ status: newStatus })
+        .eq('id', vehicleId)
+
+    if (error) throw new Error(error.message)
+    return true
+}
+
 export async function deleteDocumentRecord(vehicleId: string, category: string) {
     const { error } = await supabase
         .from('vehicle_media')

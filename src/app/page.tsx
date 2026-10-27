@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import Link from 'next/link'
 import { addWatermarkToFile } from '@/utils/watermark'
-import { fetchActiveVehicles, fetchVehicleMedia, insertVehicle } from '@/services/vehicleService'
+import { fetchActiveVehicles, fetchVehicleMedia, insertVehicle, updateVehicleStatus, deleteDocumentRecord } from '@/services/vehicleService'
 import VehicleIntakeModal from '@/components/forms/VehicleIntakeModal'
 import ConfirmModal from '@/components/ui/ConfirmModal'
 import PreviewModal from '@/components/ui/PreviewModal'
@@ -31,11 +31,7 @@ type MediaItem = {
   vehicle_id: string
 }
 
-type ToastState = {
-  message: string
-  type: 'success' | 'error'
-} | null
-
+type ToastState = { message: string; type: 'success' | 'error' } | null
 type ConfirmState = {
   title: string
   message: string
@@ -43,11 +39,7 @@ type ConfirmState = {
   confirmVariant?: 'primary' | 'danger' | 'success'
   onConfirm: () => void
 } | null
-
-type PreviewState = {
-  url: string
-  title: string
-} | null
+type PreviewState = { url: string; title: string } | null
 
 const PHOTO_CATEGORIES = [
   { key: 'front', label: 'Front View' },
@@ -84,6 +76,9 @@ export default function FrontDeskDashboard() {
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmNewPassword, setConfirmNewPassword] = useState('')
+  const [showOldPassword, setShowOldPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   const supabase = createClient()
   const isDark = theme === 'dark'
@@ -165,6 +160,53 @@ export default function FrontDeskDashboard() {
     }
   }
 
+  async function handleUpdateSettings(e: React.FormEvent) {
+    e.preventDefault()
+    if (!currentUserId) return
+
+    try {
+      const { error: profileError } = await supabase
+        .from('users')
+        .update({ full_name: settingsFullName })
+        .eq('id', currentUserId)
+
+      if (profileError) throw profileError
+
+      if (newPassword.trim()) {
+        if (!oldPassword.trim()) {
+          showToast('Please enter your current password.', 'error')
+          return
+        }
+        if (newPassword !== confirmNewPassword) {
+          showToast('New passwords do not match.', 'error')
+          return
+        }
+
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: currentUserEmail,
+          password: oldPassword.trim(),
+        })
+
+        if (signInError) {
+          showToast('Incorrect old password.', 'error')
+          return
+        }
+
+        const { error: passwordError } = await supabase.auth.updateUser({ password: newPassword.trim() })
+        if (passwordError) throw passwordError
+
+        setOldPassword('')
+        setNewPassword('')
+        setConfirmNewPassword('')
+      }
+
+      showToast('Settings & security updated successfully!', 'success')
+      setShowSettingsModal(false)
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update settings.', 'error')
+    }
+  }
+
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>, category: string) {
     const file = e.target.files?.[0]
     if (!file || !selectedVehicle) return
@@ -175,11 +217,11 @@ export default function FrontDeskDashboard() {
       return
     }
 
-    const categoryLabel = category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
+    const label = category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
 
     setConfirmModal({
       title: 'Confirm Document Upload',
-      message: `Watermark and upload "${file.name}" for ${categoryLabel}?`,
+      message: `Watermark and upload "${file.name}" for ${label}?`,
       confirmText: 'Upload Document',
       confirmVariant: 'primary',
       onConfirm: () => executeFileUpload(file, category),
@@ -231,6 +273,75 @@ export default function FrontDeskDashboard() {
     }
   }
 
+  function requestDeleteDocument(category: string) {
+    const label = category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
+    setConfirmModal({
+      title: 'Confirm Document Removal',
+      message: `Are you sure you want to remove the ${label}?`,
+      confirmText: 'Remove Document',
+      confirmVariant: 'danger',
+      onConfirm: () => executeDeleteDocument(category),
+    })
+  }
+
+  async function executeDeleteDocument(category: string) {
+    setConfirmModal(null)
+    if (!selectedVehicle) return
+
+    try {
+      const doc = mediaItems.find(m => m.media_type === 'document' && m.category === category)
+      if (doc && doc.file_url) {
+        const pathParts = doc.file_url.split('/vehicle-files/')
+        if (pathParts.length > 1) {
+          await supabase.storage.from('vehicle-files').remove([decodeURIComponent(pathParts[1])])
+        }
+      }
+
+      await deleteDocumentRecord(selectedVehicle.id, category)
+      showToast('Document removed successfully.', 'success')
+      const updatedMedia = await fetchVehicleMedia(selectedVehicle.id)
+      setMediaItems(updatedMedia)
+    } catch (err: any) {
+      showToast(err.message || 'Failed to remove document', 'error')
+    }
+  }
+
+  async function handleSendToWorkshop() {
+    if (!selectedVehicle) return
+    setConfirmModal({
+      title: 'Proceed to Workshop',
+      message: `Send vehicle ${selectedVehicle.plate_number} to the workshop for 'Before' photo capture?`,
+      confirmText: 'Proceed',
+      confirmVariant: 'success',
+      onConfirm: async () => {
+        setConfirmModal(null)
+        try {
+          await updateVehicleStatus(selectedVehicle.id, 'pending_before_photos')
+          setSelectedVehicle({ ...selectedVehicle, status: 'pending_before_photos' })
+          showToast('Vehicle status updated to Pending Before Photos!', 'success')
+          const list = await fetchActiveVehicles()
+          setVehicles(list)
+        } catch (err: any) {
+          showToast(err.message || 'Failed to update status', 'error')
+        }
+      }
+    })
+  }
+
+  function requestSignOut() {
+    setConfirmModal({
+      title: 'Confirm Sign Out',
+      message: 'Are you sure you want to sign out of the Vehicle Management System?',
+      confirmText: 'Sign Out',
+      confirmVariant: 'danger',
+      onConfirm: async () => {
+        setConfirmModal(null)
+        await supabase.auth.signOut()
+        window.location.href = '/login'
+      }
+    })
+  }
+
   async function handleDownload(url: string, title: string) {
     try {
       const res = await fetch(url)
@@ -249,7 +360,6 @@ export default function FrontDeskDashboard() {
   }
 
   const technicianPhotos = mediaItems.filter(m => m.media_type.startsWith('photo_'))
-  const additionalPhotos = mediaItems.filter(m => m.media_type === 'photo_additional')
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
@@ -267,6 +377,81 @@ export default function FrontDeskDashboard() {
       )}
       <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} isDark={isDark} />
 
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto py-10">
+          <div className="border border-slate-800 bg-slate-900 rounded-3xl shadow-2xl max-w-lg w-full p-8 text-slate-100 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="text-lg font-extrabold text-white">User Account Settings</h3>
+                <p className="text-xs mt-0.5 font-medium text-slate-400">Manage appearance, profile, and security credentials.</p>
+              </div>
+              <button onClick={() => setShowSettingsModal(false)} className="rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white cursor-pointer">&times;</button>
+            </div>
+
+            <form onSubmit={handleUpdateSettings} className="space-y-5">
+              <div className="p-4 rounded-2xl border border-slate-800 bg-slate-950">
+                <label className="block text-[11px] font-bold uppercase tracking-wider mb-2 text-slate-300">Interface Theme Mode</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button type="button" onClick={() => setTheme('light')} className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${theme === 'light' ? 'bg-blue-600 text-white border-blue-500 shadow-md' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>☀️ Day Mode</button>
+                  <button type="button" onClick={() => setTheme('dark')} className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${theme === 'dark' ? 'bg-blue-600 text-white border-blue-500 shadow-md' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>🌙 Night Mode</button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Email (Locked)</label>
+                  <input type="text" disabled value={currentUserEmail} className="w-full border border-slate-800 bg-slate-950 text-slate-500 rounded-xl p-3 text-xs font-medium cursor-not-allowed" />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Username (Locked)</label>
+                  <input type="text" disabled value={settingsUsername} className="w-full border border-slate-800 bg-slate-950 text-slate-500 rounded-xl p-3 text-xs font-medium cursor-not-allowed" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-slate-400">Full Name *</label>
+                <input type="text" required value={settingsFullName} onChange={(e) => setSettingsFullName(e.target.value)} className="w-full border border-slate-800 bg-slate-950 text-white rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+              </div>
+
+              <div className="pt-4 border-t border-slate-800 space-y-4">
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-300">Change Password (Optional)</h4>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider mb-1 text-slate-400">Current Password</label>
+                  <div className="relative">
+                    <input type={showOldPassword ? 'text' : 'password'} placeholder="••••••••" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} className="w-full border border-slate-800 bg-slate-950 text-white rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                    <button type="button" onClick={() => setShowOldPassword(!showOldPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-blue-500 cursor-pointer">{showOldPassword ? '🙈 Hide' : '👁️ View'}</button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider mb-1 text-slate-400">New Password</label>
+                  <div className="relative">
+                    <input type={showNewPassword ? 'text' : 'password'} placeholder="••••••••" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full border border-slate-800 bg-slate-950 text-white rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                    <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-blue-500 cursor-pointer">{showNewPassword ? '🙈 Hide' : '👁️ View'}</button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider mb-1 text-slate-400">Confirm New Password</label>
+                  <div className="relative">
+                    <input type={showConfirmPassword ? 'text' : 'password'} placeholder="••••••••" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} className="w-full border border-slate-800 bg-slate-950 text-white rounded-xl p-3 pr-10 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                    <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-blue-500 cursor-pointer">{showConfirmPassword ? '🙈 Hide' : '👁️ View'}</button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+                <button type="button" onClick={() => setShowSettingsModal(false)} className="px-5 py-2.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer">Cancel</button>
+                <button type="submit" className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer">Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
       <header className={`border-b sticky top-0 z-40 backdrop-blur-md ${isDark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'}`}>
         <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
           <div className="flex items-center gap-3">
@@ -276,7 +461,7 @@ export default function FrontDeskDashboard() {
               <p className="text-[11px] text-slate-400">Front Desk Dashboard</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className="p-2 rounded-xl text-xs font-bold border border-slate-700 bg-slate-800 text-amber-300 cursor-pointer">
               {isDark ? '☀️' : '🌙'}
             </button>
@@ -289,7 +474,7 @@ export default function FrontDeskDashboard() {
                 + New Vehicle Intake
               </button>
             )}
-            <button onClick={async () => { await supabase.auth.signOut(); window.location.href = '/login'; }} className="font-bold px-3.5 py-2 rounded-xl text-xs border border-rose-900 bg-rose-950 text-rose-300 cursor-pointer">Sign Out</button>
+            <button onClick={requestSignOut} className="font-bold px-3.5 py-2 rounded-xl text-xs border border-rose-900 bg-rose-950 text-rose-300 cursor-pointer">Sign Out</button>
           </div>
         </div>
       </header>
@@ -297,9 +482,17 @@ export default function FrontDeskDashboard() {
       <main className="max-w-7xl mx-auto px-6 py-8">
         {selectedVehicle ? (
           <div>
-            <button onClick={() => setSelectedVehicle(null)} className="mb-6 text-xs font-bold px-3.5 py-2 rounded-xl border border-slate-800 bg-slate-950 text-blue-400 cursor-pointer">
-              &larr; Back to Registry
-            </button>
+            <div className="flex justify-between items-center mb-6">
+              <button onClick={() => setSelectedVehicle(null)} className="text-xs font-bold px-3.5 py-2 rounded-xl border border-slate-800 bg-slate-950 text-blue-400 cursor-pointer">
+                &larr; Back to Registry
+              </button>
+
+              {selectedVehicle.status === 'intake' && (
+                <button onClick={handleSendToWorkshop} className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all cursor-pointer flex items-center gap-2">
+                  <span>➡️ Proceed to Pending Before Photos</span>
+                </button>
+              )}
+            </div>
 
             <div className="border border-slate-800 bg-slate-950 rounded-3xl p-8 mb-8 shadow-2xl">
               <div className="flex justify-between items-center pb-6 border-b border-slate-800">
@@ -350,7 +543,10 @@ export default function FrontDeskDashboard() {
                           <p className={`text-xs font-semibold mb-5 ${doc ? 'text-emerald-400' : 'text-slate-500'}`}>{doc ? '✓ Verified & Stored' : 'Pending Upload'}</p>
                         </div>
                         {doc ? (
-                          <button onClick={() => setPreviewMedia({ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${label}` })} className="w-full bg-blue-950 text-blue-300 hover:bg-blue-900 py-2.5 rounded-xl text-xs font-bold border border-blue-800 cursor-pointer">View Document</button>
+                          <div className="flex gap-2">
+                            <button onClick={() => setPreviewMedia({ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${label}` })} className="w-1/2 bg-blue-950 text-blue-300 hover:bg-blue-900 py-2.5 rounded-xl text-xs font-bold border border-blue-800 cursor-pointer">View</button>
+                            <button onClick={() => requestDeleteDocument(cat)} className="w-1/2 bg-rose-950 text-rose-300 hover:bg-rose-900 py-2.5 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer">Remove</button>
+                          </div>
                         ) : (
                           <div>
                             <label htmlFor={`file-${cat}`} className="w-full block text-center bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow-md">Upload File</label>
