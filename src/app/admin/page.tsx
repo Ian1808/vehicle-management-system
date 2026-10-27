@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/utils/supabase/client'
+import { useTheme } from '@/lib/theme'
 import Link from 'next/link'
 
 type Vehicle = {
@@ -111,8 +112,8 @@ export default function AdminHub() {
     const [adminNewPassword, setAdminNewPassword] = useState('')
     const [showAdminNewPassword, setShowAdminNewPassword] = useState(false)
 
-    // Theme State ('dark' | 'light')
-    const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+    // Theme State ('dark' | 'light') — shared across all pages via useTheme()
+    const { theme, setTheme, isDark } = useTheme()
 
     // Settings Modal State
     const [showSettingsModal, setShowSettingsModal] = useState(false)
@@ -567,8 +568,6 @@ export default function AdminHub() {
         window.location.href = '/login'
     }
 
-    const isDark = theme === 'dark'
-
     const totalFleetIntakeCost = vehicles.reduce((acc, v) => acc + Number(v.intake_cost || 0), 0)
     const totalFleetRepairCost = vehicles.reduce((acc, v) => acc + Number(v.repair_cost || 0), 0)
     const totalFleetMarketValue = vehicles.reduce((acc, v) => acc + Number(v.market_value || 0), 0)
@@ -581,8 +580,12 @@ export default function AdminHub() {
             {toast && (
                 <div className="fixed top-6 right-6 z-50 animate-bounce">
                     <div className={`px-5 py-3 rounded-2xl shadow-2xl text-xs font-bold flex items-center gap-3 border ${toast.type === 'success'
-                            ? 'bg-emerald-950 text-emerald-200 border-emerald-700/80 shadow-emerald-950/50'
-                            : 'bg-rose-950 text-rose-200 border-rose-700/80 shadow-rose-950/50'
+                            ? isDark
+                                ? 'bg-emerald-950 text-emerald-200 border-emerald-700/80 shadow-emerald-950/50'
+                                : 'bg-emerald-100 text-emerald-800 border-emerald-300 shadow-emerald-100/60'
+                            : isDark
+                                ? 'bg-rose-950 text-rose-200 border-rose-700/80 shadow-rose-950/50'
+                                : 'bg-rose-100 text-rose-800 border-rose-300 shadow-rose-100/60'
                         }`}>
                         <span>{toast.type === 'success' ? '✨' : '⚠️'}</span>
                         <span>{toast.message}</span>
@@ -1070,7 +1073,7 @@ export default function AdminHub() {
                 </div>
 
                 {/* Navigation Tabs */}
-                <div className="flex flex-wrap gap-3 mb-8 border-b pb-4 border-slate-800/40">
+                <div className={`flex flex-wrap gap-3 mb-8 border-b pb-4 ${isDark ? 'border-slate-800/40' : 'border-slate-200'}`}>
                     <button
                         onClick={() => { setActiveTab('vehicles'); setSelectedVehicle(null); }}
                         className={`px-5 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer border ${activeTab === 'vehicles'
@@ -1220,7 +1223,7 @@ export default function AdminHub() {
 
                         <div className="space-y-8">
                             <div className={`rounded-3xl border p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
-                                <h3 className="text-sm font-extrabold uppercase tracking-wider mb-6 pb-4 border-b border-slate-800/50">
+                                <h3 className={`text-sm font-extrabold uppercase tracking-wider mb-6 pb-4 border-b ${isDark ? 'border-slate-800/50' : 'border-slate-200'}`}>
                                     Technician "Before" Photos ({mediaItems.filter(m => m.media_type === 'photo_before').length}/8 Captured)
                                 </h3>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1238,7 +1241,7 @@ export default function AdminHub() {
                                                     <button
                                                         type="button"
                                                         onClick={() => setPreviewMedia({ url: uploaded.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })}
-                                                        className="w-full text-center bg-slate-800 hover:bg-slate-700 text-purple-300 py-2 rounded-xl text-xs font-bold transition-colors border border-slate-700 cursor-pointer"
+                                                        className={`w-full text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-600 border-slate-200'}`}
                                                     >
                                                         View Photo
                                                     </button>
@@ -1250,7 +1253,7 @@ export default function AdminHub() {
                             </div>
 
                             <div className={`rounded-3xl border p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
-                                <h3 className="text-sm font-extrabold uppercase tracking-wider mb-6 pb-4 border-b border-slate-800/50">
+                                <h3 className={`text-sm font-extrabold uppercase tracking-wider mb-6 pb-4 border-b ${isDark ? 'border-slate-800/50' : 'border-slate-200'}`}>
                                     Technician "After" Photos ({mediaItems.filter(m => m.media_type === 'photo_after').length}/8 Captured)
                                 </h3>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1268,7 +1271,7 @@ export default function AdminHub() {
                                                     <button
                                                         type="button"
                                                         onClick={() => setPreviewMedia({ url: uploaded.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })}
-                                                        className="w-1/2 text-center bg-slate-800 hover:bg-slate-700 text-blue-300 py-2 rounded-xl text-xs font-bold transition-colors border border-slate-700 cursor-pointer"
+                                                        className={`w-1/2 text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-blue-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-blue-600 border-slate-200'}`}
                                                     >
                                                         View Photo
                                                     </button>
@@ -1437,7 +1440,7 @@ export default function AdminHub() {
 
                                         <button
                                             onClick={() => openEditBankModal(b)}
-                                            className="w-full bg-slate-800 hover:bg-slate-700 text-purple-300 py-2.5 rounded-xl text-xs font-bold transition-all border border-slate-700 cursor-pointer"
+                                            className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-600 border-slate-200'}`}
                                         >
                                             Edit Bank Criteria &rarr;
                                         </button>

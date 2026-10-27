@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
+import { useTheme } from '@/lib/theme'
 import Link from 'next/link'
 
 type Toast = { message: string; type: 'success' | 'error' }
@@ -14,10 +15,9 @@ export default function SignupPage() {
     const [role, setRole] = useState('front_desk')
     const [loading, setLoading] = useState(false)
     const [toast, setToast] = useState<Toast | null>(null)
-    const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+    const { setTheme, isDark } = useTheme()
 
     const supabase = createClient()
-    const isDark = theme === 'dark'
 
     function showToast(message: string, type: 'success' | 'error') {
         setToast({ message, type })
@@ -70,14 +70,19 @@ export default function SignupPage() {
         <main className={`min-h-screen flex items-center justify-center p-4 relative transition-colors duration-200 ${bgClass}`}>
             <button
                 onClick={() => setTheme(isDark ? 'light' : 'dark')}
-                className="absolute top-6 right-6 p-2.5 rounded-xl text-xs font-bold border border-slate-700 bg-slate-800 text-amber-300 cursor-pointer shadow-md"
+                className={`absolute top-6 right-6 p-2.5 rounded-xl text-xs font-bold border shadow-md cursor-pointer ${isDark ? 'border-slate-700 bg-slate-800 text-amber-300' : 'border-slate-200 bg-white text-amber-600'}`}
             >
                 {isDark ? '☀️ Day Mode' : '🌙 Night Mode'}
             </button>
 
             {toast && (
                 <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-bounce">
-                    <div className={`px-5 py-3 rounded-xl shadow-2xl text-sm font-semibold flex items-center gap-3 border ${toast.type === 'success' ? 'bg-emerald-900 text-emerald-100 border-emerald-700' : 'bg-rose-900 text-rose-100 border-rose-700'
+                    <div className={`px-5 py-3 rounded-xl shadow-2xl text-sm font-semibold flex items-center gap-3 border ${toast.type === 'success' ? isDark
+                            ? 'bg-emerald-900 text-emerald-100 border-emerald-700'
+                            : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                            : isDark
+                                ? 'bg-rose-900 text-rose-100 border-rose-700'
+                                : 'bg-rose-100 text-rose-800 border-rose-300'
                         }`}>
                         <span>{toast.type === 'success' ? '✨' : '⚠️'}</span>
                         <span>{toast.message}</span>
