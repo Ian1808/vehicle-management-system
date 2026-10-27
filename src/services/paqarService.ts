@@ -1,9 +1,9 @@
-// Paqar Public API Service (https://paqar.my/api-docs)
+// Client-side service calling our Next.js API proxy to avoid browser CORS errors
 
 export async function fetchPaqarValuationByPlate(plateNumber: string) {
     try {
         const cleanedPlate = plateNumber.toUpperCase().trim().replace(/[^A-Z0-9]/g, '')
-        const res = await fetch(`https://paqar.my/api/v1/valuation?plate=${encodeURIComponent(cleanedPlate)}`, {
+        const res = await fetch(`/api/paqar?plate=${encodeURIComponent(cleanedPlate)}`, {
             method: 'GET',
             headers: {
                 'Accept': 'application/json',
@@ -11,16 +11,13 @@ export async function fetchPaqarValuationByPlate(plateNumber: string) {
         })
 
         if (!res.ok) {
-            if (res.status === 404) {
-                return { error: 'Plate number not found on Paqar.my.' }
-            }
-            throw new Error(`Paqar API error: status ${res.status}`)
+            return { error: 'Plate number not found on Paqar.my.' }
         }
 
         const data = await res.json()
         return data
     } catch (error) {
-        console.error("Failed to fetch from Paqar API:", error)
+        console.error("Failed to fetch via proxy:", error)
         return null
     }
 }
