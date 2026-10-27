@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import Link from 'next/link'
 import { addWatermarkToFile } from '@/utils/watermark'
 import { fetchActiveVehicles, fetchVehicleMedia, insertVehicle, updateVehicleStatus, deleteDocumentRecord } from '@/services/vehicleService'
 import { useTheme } from '@/lib/theme'
@@ -66,7 +65,6 @@ export default function FrontDeskModule() {
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [userRole, setUserRole] = useState('front_desk')
   const additionalPhotos = mediaItems.filter(m => m.media_type === 'photo_additional')
   const photoStage = selectedVehicle ? getPhotoStageRules(selectedVehicle.status) : null
   const showBefore = photoStage?.before !== 'hidden'
@@ -119,7 +117,6 @@ export default function FrontDeskModule() {
           return
         }
 
-        setUserRole(userData?.role || 'front_desk')
         setSettingsFullName(userData?.full_name || '')
         setSettingsUsername(userData?.username || '')
 
@@ -402,9 +399,6 @@ export default function FrontDeskModule() {
             <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className={`p-2 rounded-xl text-xs font-bold border cursor-pointer ${isDark ? 'border-slate-700 bg-slate-800 text-amber-300' : 'border-slate-200 bg-slate-100 text-amber-600'}`}>
               {isDark ? '☀️' : '🌙'}
             </button>
-            {userRole === 'admin' && (
-              <Link href="/?tab=admin" className="font-bold px-3.5 py-2 rounded-xl text-xs border border-purple-800 bg-purple-950 text-purple-300">🛡️ Admin Hub</Link>
-            )}
             <button onClick={() => setShowSettingsModal(true)} className={`font-semibold px-3.5 py-2 rounded-xl text-xs border cursor-pointer ${isDark ? 'border-slate-700 bg-slate-800 text-slate-200' : 'border-slate-200 bg-slate-100 text-slate-700'}`}>⚙️ Settings</button>
             {!selectedVehicle && (
               <button onClick={() => setShowModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-lg cursor-pointer">

@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { useTheme } from '@/lib/theme'
-import Link from 'next/link'
 import Toast from '@/components/ui/Toast'
 import ConfirmModal from '@/components/ui/ConfirmModal'
 import PreviewModal from '@/components/ui/PreviewModal'
@@ -18,6 +17,7 @@ import ChangePasswordModal from '@/components/admin/ChangePasswordModal'
 import BankModal, { type BankPayload, type BankRecord } from '@/components/admin/BankModal'
 import VehicleAuditGrid from '@/components/admin/VehicleAuditGrid'
 import AdditionalPhotosGrid from '@/components/admin/AdditionalPhotosGrid'
+import VehicleEditModal, { type VehicleEditPayload } from '@/components/admin/VehicleEditModal'
 import { getPhotoStageRules } from '@/lib/photoStages'
 
 type Vehicle = {
@@ -80,6 +80,12 @@ const TABS = [
 
 const ROLE_FILTERS = ['all', 'admin', 'front_desk', 'technician'] as const
 
+const DOCUMENT_CATEGORIES = ['grant', 'jpj', 'insurance', 'ber'] as const
+
+function adminDocumentLabel(category: string): string {
+    return category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
+}
+
 export default function AdminModule() {
     const [activeTab, setActiveTab] = useState<'vehicles' | 'users' | 'banks' | 'trash'>('vehicles')
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
@@ -97,6 +103,7 @@ export default function AdminModule() {
     // New Bank Modal State
     const [showBankModal, setShowBankModal] = useState(false)
     const [editingBank, setEditingBank] = useState<BankRecord | null>(null)
+    const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null)
 
     // New Staff User Modal State
     const [showUserModal, setShowUserModal] = useState(false)
@@ -490,6 +497,75 @@ export default function AdminModule() {
         }
     }
 
+    async function handleSaveVehicleEdit(payload: VehicleEditPayload): Promise<boolean> {
+        if (!editingVehicle) return false
+
+        try {
+            const { error } = await supabase
+                .from('vehicles')
+                .update({
+                    plate_number: payload.plate_number,
+                    chassis_number: payload.chassis_number,
+                    make_model_year: payload.make_model_year,
+                    insurance_panel: payload.insurance_panel,
+                    intake_cost: payload.intake_cost,
+                    market_value: payload.market_value,
+                    repair_cost: payload.repair_cost,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', editingVehicle.id)
+
+            if (error) throw error
+
+            showToast(`Vehicle ${payload.plate_number} updated successfully!`, 'success')
+            setSelectedVehicle((prev) => prev ? { ...prev, ...payload } : prev)
+            setEditingVehicle(null)
+            await fetchAllData()
+            return true
+        } catch (err) {
+            showToast(err instanceof Error ? err.message : 'Failed to update vehicle', 'error')
+            return false
+        }
+    }
+
+    function requestPermanentDelete(vehicleId: string, plate: string) {
+        setConfirmModal({
+            title: 'Permanently Delete Vehicle',
+            message: `This permanently erases ${plate} and ALL of its photos & documents from storage. This cannot be undone.`,
+            confirmText: 'Delete Forever',
+            confirmVariant: 'danger',
+            onConfirm: () => executePermanentDelete(vehicleId),
+        })
+    }
+
+    async function executePermanentDelete(vehicleId: string) {
+        setConfirmModal(null)
+        try {
+            const { data: media } = await supabase.from('vehicle_media').select('*').eq('vehicle_id', vehicleId)
+
+            const storagePaths: string[] = []
+            for (const item of media || []) {
+                if (item.file_url) {
+                    const url = new URL(item.file_url)
+                    const marker = '/storage/v1/object/public/vehicle-files/'
+                    const idx = url.pathname.indexOf(marker)
+                    if (idx !== -1) storagePaths.push(url.pathname.slice(idx + marker.length))
+                }
+            }
+
+            if (storagePaths.length) {
+                await supabase.storage.from('vehicle-files').remove(storagePaths)
+            }
+
+            await supabase.from('vehicle_media').delete().eq('vehicle_id', vehicleId)
+            await supabase.from('vehicles').delete().eq('id', vehicleId)
+            showToast('Vehicle permanently deleted.', 'success')
+            await fetchDeletedVehicles()
+        } catch (err) {
+            showToast(err instanceof Error ? err.message : 'Failed to delete vehicle', 'error')
+        }
+    }
+
     async function handleDownload(url: string, title: string) {
         try {
             showToast('Preparing download...', 'success')
@@ -600,6 +676,17 @@ export default function AdminModule() {
                 />
             )}
 
+            {/* Edit Vehicle Modal */}
+            {editingVehicle && (
+                <VehicleEditModal
+                    key={editingVehicle.id}
+                    vehicle={editingVehicle}
+                    isDark={isDark}
+                    onClose={() => setEditingVehicle(null)}
+                    onSave={handleSaveVehicleEdit}
+                />
+            )}
+
             {/* Settings Modal */}
             {showSettingsModal && (
                 <AccountSettingsModal
@@ -638,18 +725,6 @@ export default function AdminModule() {
                         >
                             {isDark ? '☀️ Light' : '🌙 Dark'}
                         </button>
-                        <Link
-                            href="/?tab=frontdesk"
-                            className={`font-bold px-3.5 py-2 rounded-xl text-xs border transition-all ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-blue-300 border-slate-700' : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'}`}
-                        >
-                            📋 Front Desk
-                        </Link>
-                        <Link
-                            href="/?tab=technician"
-                            className={`font-bold px-3.5 py-2 rounded-xl text-xs border transition-all ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-slate-700' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}
-                        >
-                            🔧 Technician Portal
-                        </Link>
                         <button
                             onClick={() => setShowSettingsModal(true)}
                             className={`font-semibold px-3.5 py-2 rounded-xl text-xs border transition-all cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
@@ -743,6 +818,14 @@ export default function AdminModule() {
                                             </button>
                                             <button
                                                 type="button"
+                                                onClick={(e) => { e.stopPropagation(); setEditingVehicle(v); }}
+                                                className="bg-slate-800 hover:bg-slate-700 text-amber-300 px-3 py-2.5 rounded-xl text-xs font-bold border border-slate-700 cursor-pointer"
+                                                title="Edit Vehicle"
+                                            >
+                                                ✏️
+                                            </button>
+                                            <button
+                                                type="button"
                                                 onClick={(e) => { e.stopPropagation(); handleSoftDelete(v.id, v.plate_number); }}
                                                 className="bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2.5 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer"
                                                 title="Move to Trash"
@@ -777,23 +860,60 @@ export default function AdminModule() {
                                     <p className="text-xs font-semibold text-slate-400 mt-1">{selectedVehicle.make_model_year} • VIN: {selectedVehicle.chassis_number}</p>
                                 </div>
 
-                                <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center gap-3 w-full md:w-auto ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                    <span className="text-xs font-black uppercase text-purple-400">Admin Override Status:</span>
-                                    <select
-                                        value={selectedVehicle.status}
-                                        onChange={(e) => handleStatusOverride(selectedVehicle.id, e.target.value)}
-                                        className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                                <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditingVehicle(selectedVehicle)}
+                                        className="px-4 py-2.5 rounded-2xl border text-xs font-bold transition-all shadow-md cursor-pointer bg-amber-600 hover:bg-amber-500 text-white border-amber-500"
                                     >
-                                        <option value="pending_before_photos">Pending Before Photos</option>
-                                        <option value="in_repair">In Repair</option>
-                                        <option value="pending_after_photos">Pending After Photos</option>
-                                        <option value="road_ready">Road Ready</option>
-                                    </select>
+                                        ✏️ Edit Vehicle
+                                    </button>
+                                    <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center gap-3 w-full md:w-auto ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                        <span className="text-xs font-black uppercase text-purple-400">Admin Override Status:</span>
+                                        <select
+                                            value={selectedVehicle.status}
+                                            onChange={(e) => handleStatusOverride(selectedVehicle.id, e.target.value)}
+                                            className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                                        >
+                                            <option value="pending_before_photos">Pending Before Photos</option>
+                                            <option value="in_repair">In Repair</option>
+                                            <option value="pending_after_photos">Pending After Photos</option>
+                                            <option value="road_ready">Road Ready</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
                         </Card>
 
                         <div className="space-y-8">
+                            <div className={`rounded-3xl border p-6 sm:p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                                <h3 className={`text-sm font-extrabold uppercase tracking-wider mb-6 pb-4 border-b ${isDark ? 'border-slate-800/50' : 'border-slate-200'}`}>
+                                    Mandatory Documents ({mediaItems.filter(m => m.media_type === 'document').length}/4 Uploaded)
+                                </h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    {DOCUMENT_CATEGORIES.map((cat) => {
+                                        const doc = mediaItems.find(m => m.media_type === 'document' && m.category === cat)
+                                        return (
+                                            <div key={cat} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                                <div>
+                                                    <p className="text-xs font-extrabold uppercase tracking-wider mb-1">{adminDocumentLabel(cat)}</p>
+                                                    <p className={`text-xs font-semibold mb-4 ${doc ? 'text-emerald-400' : 'text-slate-500'}`}>{doc ? '✓ Uploaded' : 'Missing'}</p>
+                                                </div>
+                                                {doc && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setPreviewMedia({ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${adminDocumentLabel(cat)}` })}
+                                                        className={`w-full text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-600 border-slate-200'}`}
+                                                    >
+                                                        View Document
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+
                             {adminShowBefore && (
                                 <VehicleAuditGrid
                                     isDark={isDark}
@@ -1011,13 +1131,23 @@ export default function AdminModule() {
                                             <h3 className={`text-lg font-black tracking-tight mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>{v.plate_number}</h3>
                                             <p className={`text-xs font-semibold mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{v.make_model_year}</p>
                                         </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleRestoreVehicle(v.id)}
-                                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
-                                        >
-                                            Restore Vehicle &rarr;
-                                        </button>
+                                        <div className="flex gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRestoreVehicle(v.id)}
+                                                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+                                            >
+                                                Restore Vehicle &rarr;
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => requestPermanentDelete(v.id, v.plate_number)}
+                                                className="bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2.5 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer"
+                                                title="Permanently Delete (cannot be undone)"
+                                            >
+                                                🗑️
+                                            </button>
+                                        </div>
                                     </Card>
                                 ))}
                             </div>
