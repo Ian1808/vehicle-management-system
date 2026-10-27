@@ -11,7 +11,7 @@ type Toast = {
 }
 
 export default function LoginPage() {
-    const [identifier, setIdentifier] = useState('') // Accepts Email or Username
+    const [identifier, setIdentifier] = useState('') // Accepts Username or Email
     const [password, setPassword] = useState('')
     const [loading, setLoading] = useState(false)
     const [toast, setToast] = useState<Toast | null>(null)
@@ -36,22 +36,21 @@ export default function LoginPage() {
         const input = identifier.trim()
         let loginEmail = input
 
-        // 1. If input is NOT an email (no '@'), resolve username to email from public.users
+        // 1. If input is NOT an email (no '@'), lookup the email linked to this username in public.users
         if (!input.includes('@')) {
             const { data: userProfile, error: profileError } = await supabase
                 .from('users')
-                .select('username') // Assuming username field holds the email or you store email separately
+                .select('email')
                 .eq('username', input)
                 .maybeSingle()
 
-            if (profileError || !userProfile) {
+            if (profileError || !userProfile?.email) {
                 showToast('Username not found. Please check your username or use your email.', 'error')
                 setLoading(false)
                 return
             }
 
-            // If your username field in public.users stores the email address:
-            loginEmail = userProfile.username
+            loginEmail = userProfile.email
         }
 
         // 2. Authenticate with Supabase Auth using the resolved email
@@ -100,7 +99,6 @@ export default function LoginPage() {
 
     return (
         <main className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative selection:bg-purple-500 selection:text-white">
-            {/* Toast Notification */}
             {toast && (
                 <div className="fixed top-6 right-6 z-50 animate-bounce">
                     <div className={`px-5 py-3 rounded-2xl shadow-2xl text-xs font-bold flex items-center gap-3 border ${toast.type === 'success'
@@ -128,7 +126,7 @@ export default function LoginPage() {
                         <input
                             type="text"
                             required
-                            placeholder="e.g. admin@workshop.com or username"
+                            placeholder="e.g. admin or admin@workshop.com"
                             value={identifier}
                             onChange={(e) => setIdentifier(e.target.value)}
                             className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:ring-2 focus:ring-purple-500 focus:outline-none font-medium"
