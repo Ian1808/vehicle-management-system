@@ -11,7 +11,7 @@ type Toast = {
 }
 
 export default function LoginPage() {
-    const [email, setEmail] = useState('')
+    const [identifier, setIdentifier] = useState('') // Accepts Email or Username
     const [password, setPassword] = useState('')
     const [loading, setLoading] = useState(false)
     const [toast, setToast] = useState<Toast | null>(null)
@@ -27,35 +27,55 @@ export default function LoginPage() {
     async function handleLogin(e: React.FormEvent) {
         e.preventDefault()
 
-        if (!email.trim() || !password) {
-            showToast('Please enter both your staff email and password.', 'error')
+        if (!identifier.trim() || !password) {
+            showToast('Please enter your username/email and password.', 'error')
             return
         }
 
         setLoading(true)
+        const input = identifier.trim()
+        let loginEmail = input
 
-        // 1. Authenticate with Supabase Auth
+        // 1. If input is NOT an email (no '@'), resolve username to email from public.users
+        if (!input.includes('@')) {
+            const { data: userProfile, error: profileError } = await supabase
+                .from('users')
+                .select('username') // Assuming username field holds the email or you store email separately
+                .eq('username', input)
+                .maybeSingle()
+
+            if (profileError || !userProfile) {
+                showToast('Username not found. Please check your username or use your email.', 'error')
+                setLoading(false)
+                return
+            }
+
+            // If your username field in public.users stores the email address:
+            loginEmail = userProfile.username
+        }
+
+        // 2. Authenticate with Supabase Auth using the resolved email
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email: email.trim(),
+            email: loginEmail,
             password,
         })
 
         if (authError || !authData.user) {
-            showToast(authError?.message || 'Invalid email or password.', 'error')
+            showToast(authError?.message || 'Invalid credentials. Please check your password.', 'error')
             setLoading(false)
             return
         }
 
         const userId = authData.user.id
 
-        // 2. Record the exact last_login timestamp in public.users
+        // 3. Record the exact last_login timestamp in public.users
         await supabase
             .from('users')
             .update({ last_login: new Date().toISOString() })
             .eq('id', userId)
 
-        // 3. Fetch user role to determine portal routing
-        const { data: userData, error: userError } = await supabase
+        // 4. Fetch user role to determine portal routing
+        const { data: userData } = await supabase
             .from('users')
             .select('role')
             .eq('id', userId)
@@ -104,13 +124,13 @@ export default function LoginPage() {
 
                 <form onSubmit={handleLogin} className="space-y-4">
                     <div>
-                        <label className="block text-xs font-bold uppercase text-slate-400 tracking-wider mb-1.5">Staff Email *</label>
+                        <label className="block text-xs font-bold uppercase text-slate-400 tracking-wider mb-1.5">Username or Email *</label>
                         <input
-                            type="email"
+                            type="text"
                             required
-                            placeholder="staff@workshop.com"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="e.g. admin@workshop.com or username"
+                            value={identifier}
+                            onChange={(e) => setIdentifier(e.target.value)}
                             className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:ring-2 focus:ring-purple-500 focus:outline-none font-medium"
                         />
                     </div>
