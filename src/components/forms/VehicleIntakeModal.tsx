@@ -9,6 +9,7 @@ type ParsedGrant = {
     chassis: string
     make: string
     model: string
+    variant: string
     spec: string
     year: string
 }
@@ -27,7 +28,7 @@ function parseGrantText(raw: string): ParsedGrant {
         .split('\n')
         .map(l => l.replace(/\s+/g, ' ').trim())
         .filter(Boolean)
-    const result: ParsedGrant = { plate: '', chassis: '', make: '', model: '', spec: '', year: '' }
+    const result: ParsedGrant = { plate: '', chassis: '', make: '', model: '', variant: '', spec: '', year: '' }
 
     const findValue = (linePredicate: (l: string) => boolean, valuePattern: RegExp): string => {
         for (let i = 0; i < lines.length; i++) {
@@ -45,10 +46,29 @@ function parseGrantText(raw: string): ParsedGrant {
         l => l.includes('PENDAFTARAN') && !l.includes('TARIKH'),
         /([A-Z]{1,3}\s?\d{1,4}[A-Z]?)/
     )
-    result.chassis = findValue(
-        l => l.includes('CHASIS') || l.includes('CHASSIS'),
-        /([A-Z0-9]{12,20})/
-    )
+    // Chassis/VIN: the value sits after "ENJIN" (when the chassis and engine
+    // numbers share one line) or after the CHASIS label, before the "/" that
+    // separates chassis from engine number. Handles OCR mangling the label
+    // ("CHASTS"), inserting spaces in the VIN, or dropping the "/" separator.
+    const chassisIdx = lines.findIndex(l => l.includes('CHAS'))
+    if (chassisIdx !== -1) {
+        const chassisLine = lines[chassisIdx]
+        let val = ''
+        if (chassisLine.includes('ENJIN')) {
+            val = chassisLine.slice(chassisLine.indexOf('ENJIN') + 5)
+        } else {
+            const ci = Math.max(chassisLine.lastIndexOf('CHASSIS'), chassisLine.lastIndexOf('CHASIS'))
+            if (ci !== -1) {
+                val = chassisLine.slice(ci + 7)
+                if (!/[A-Z0-9]{8,}/.test(val) && lines[chassisIdx + 1]) {
+                    val = (val + ' ' + lines[chassisIdx + 1]).trim()
+                }
+            }
+        }
+        const firstPart = val.split('/')[0].replace(/[^A-Z0-9]/g, '')
+        const chassisMatch = firstPart.match(/[A-Z]{2,5}\d{4,}[A-Z]{1,4}\d{3,6}/) || firstPart.match(/[A-Z0-9]{12,18}/)
+        if (chassisMatch) result.chassis = chassisMatch[0]
+    }
     result.year = findValue(
         l => l.includes('TAHUN') || l.includes('DIBUAT'),
         /((?:19|20)\d{2})/
@@ -81,6 +101,12 @@ function parseGrantText(raw: string): ParsedGrant {
                 result.model = tokens[0] || ''
             }
         }
+    }
+
+    // Variant = everything after the base model name, e.g. "CIVIC 1.8L I-VTEC (A)" → "1.8L I-VTEC (A)".
+    const modelTokens = result.model.split(/\s+/).filter(Boolean)
+    if (modelTokens.length >= 2) {
+        result.variant = modelTokens.slice(1).join(' ')
     }
 
     return result
@@ -207,14 +233,18 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                     if (modelMatch) {
                         setSelectedModel(modelMatch)
                         notes.push(`Model ${modelMatch}`)
-                        if (parsed.spec) {
-                            const variantMatch = matchOption(getVariantsForModel(makeMatch, modelMatch), parsed.spec)
-                            if (variantMatch) {
-                                setSelectedVariant(variantMatch)
-                                notes.push(`Spec ${variantMatch}`)
-                            } else {
-                                notes.push(`Spec “${parsed.spec}” not listed — select manually`)
-                            }
+                        const variantOptions = getVariantsForModel(makeMatch, modelMatch)
+                        const variantCandidates = [parsed.variant, parsed.spec].filter(Boolean)
+                        let variantMatch: string | null = null
+                        for (const candidate of variantCandidates) {
+                            variantMatch = matchOption(variantOptions, candidate)
+                            if (variantMatch) break
+                        }
+                        if (variantMatch) {
+                            setSelectedVariant(variantMatch)
+                            notes.push(`Variant ${variantMatch}`)
+                        } else if (variantCandidates.length > 0) {
+                            notes.push(`Variant “${variantCandidates[0]}” not listed — select manually`)
                         }
                     } else {
                         notes.push(`Model “${parsed.model}” not in list — select manually`)

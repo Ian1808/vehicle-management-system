@@ -508,6 +508,7 @@ export const VEHICLE_DATABASE: Record<string, { models: string[]; years: number[
                 "1.5 E",
                 "1.5 V",
                 "1.5 RS",
+                "1.8L I-VTEC (A)",
                 "2.0 e:HEV RS"
             ],
             "HR-V": [
