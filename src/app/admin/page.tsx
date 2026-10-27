@@ -587,10 +587,16 @@ export default function AdminHub() {
                             {isDark ? '☀️ Light' : '🌙 Dark'}
                         </button>
                         <Link
+                            href="/"
+                            className={`font-bold px-3.5 py-2 rounded-xl text-xs border transition-all ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-blue-300 border-slate-700' : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'}`}
+                        >
+                            📋 Front Desk
+                        </Link>
+                        <Link
                             href="/technician"
                             className={`font-bold px-3.5 py-2 rounded-xl text-xs border transition-all ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-slate-700' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}
                         >
-                            🔧 Technician Portal &rarr;
+                            🔧 Technician Portal
                         </Link>
                         <button
                             onClick={() => setShowSettingsModal(true)}
