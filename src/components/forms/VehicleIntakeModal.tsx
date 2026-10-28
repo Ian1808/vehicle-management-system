@@ -390,6 +390,11 @@ async function tryCloudOcr(file: File): Promise<{ parsed: ParsedGrant } | { unav
     }
 }
 
+// Cloud OCR (Google Vision) is opt-in. Off by default so scan results come
+// purely from the offline Tesseract engine; set NEXT_PUBLIC_ENABLE_CLOUD_OCR
+// to "true" in .env.local (and restart the dev server) to turn it back on.
+const CLOUD_OCR_ENABLED = process.env.NEXT_PUBLIC_ENABLE_CLOUD_OCR === 'true'
+
 type Props = {
     isOpen: boolean
     onClose: () => void
@@ -527,16 +532,18 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         setOcrBusy(true)
         let cloudUnavailable = false
         try {
-            // 1) Cloud OCR first (Google Vision) — far more accurate on grants.
-            setOcrStatus('reading')
-            const cloudResult = await tryCloudOcr(file)
-            if (cloudResult && 'parsed' in cloudResult) {
-                if (!isOpenRef.current) return
-                setOcrStatus('parsing')
-                applyParsed(cloudResult.parsed, 0)
-                return
+            // 1) Cloud OCR first (Google Vision) — only when explicitly enabled.
+            if (CLOUD_OCR_ENABLED) {
+                setOcrStatus('reading')
+                const cloudResult = await tryCloudOcr(file)
+                if (cloudResult && 'parsed' in cloudResult) {
+                    if (!isOpenRef.current) return
+                    setOcrStatus('parsing')
+                    applyParsed(cloudResult.parsed, 0)
+                    return
+                }
+                cloudUnavailable = cloudResult !== null && 'unavailable' in cloudResult
             }
-            cloudUnavailable = cloudResult !== null && 'unavailable' in cloudResult
 
             // 2) Offline Tesseract fallback (tries 0°/90°/180°/270°).
             setOcrStatus('loading')
