@@ -263,6 +263,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     const [ocrStatus, setOcrStatus] = useState('')
     const [ocrPass, setOcrPass] = useState(0)
     const [manualOverride, setManualOverride] = useState(false)
+    const [ocrFields, setOcrFields] = useState<ParsedGrant | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     if (!isOpen) return null
@@ -281,7 +282,8 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     function applyParsed(parsed: ParsedGrant, rotation: number) {
         const notes: string[] = []
         if (rotation !== 0) notes.push(`Rotated ${rotation}°`)
-        if (!manualOverride) notes.push('Make/Model/Year locked — “Enter data manually” to edit')
+        setOcrFields(parsed)
+        if (!manualOverride) notes.push('Vehicle details from OCR — “Enter data manually” to change')
 
         if (parsed.plate) {
             setPlate(parsed.plate)
@@ -373,12 +375,21 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         e.preventDefault()
         if (plateError || !plate) return
 
-        if (!selectedMake || !selectedModel || !selectedYear) {
-            showToast('Please select Make, Model, and Mfg. Year.', 'error')
-            return
+        let makeModelYearStr: string
+        if (manualOverride) {
+            if (!selectedMake || !selectedModel || !selectedYear) {
+                showToast('Please select Make, Model, and Mfg. Year.', 'error')
+                return
+            }
+            makeModelYearStr = `${selectedMake} ${selectedModel} ${selectedVariant ? `(${selectedVariant})` : ''} - ${selectedYear}`.trim()
+        } else {
+            if (!ocrFields?.make || !ocrFields?.model || !ocrFields?.year) {
+                showToast('Scan the grant photo to fill vehicle details, or click “Enter data manually”.', 'error')
+                return
+            }
+            makeModelYearStr = `${ocrFields.make} ${ocrFields.model} - ${ocrFields.year}`.trim()
         }
 
-        const makeModelYearStr = `${selectedMake} ${selectedModel} ${selectedVariant ? `(${selectedVariant})` : ''} - ${selectedYear}`.trim()
         onSubmit({
             plate_number: plate,
             chassis_number: chassis.toUpperCase(),
@@ -466,39 +477,62 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                         )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Make *</label>
-                            <select required disabled={!manualOverride} value={selectedMake} onChange={handleMakeChange} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${inputBgClass}`}>
-                                <option value="">-- Select Make --</option>
-                                {makes.map(m => <option key={m} value={m}>{m}</option>)}
-                            </select>
-                        </div>
-                        <div>
-                            <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Model *</label>
-                            <select required disabled={!manualOverride || !selectedMake} value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${inputBgClass}`}>
-                                <option value="">-- Select Model --</option>
-                                {availableModels.map(md => <option key={md} value={md}>{md}</option>)}
-                            </select>
-                        </div>
-                    </div>
+                    {manualOverride ? (
+                        <>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Make *</label>
+                                    <select required value={selectedMake} onChange={handleMakeChange} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer ${inputBgClass}`}>
+                                        <option value="">-- Select Make --</option>
+                                        {makes.map(m => <option key={m} value={m}>{m}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Model *</label>
+                                    <select required disabled={!selectedMake} value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer disabled:opacity-50 ${inputBgClass}`}>
+                                        <option value="">-- Select Model --</option>
+                                        {availableModels.map(md => <option key={md} value={md}>{md}</option>)}
+                                    </select>
+                                </div>
+                            </div>
 
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Variant / Spec</label>
-                            <select disabled={!manualOverride || !selectedModel} value={selectedVariant} onChange={(e) => setSelectedVariant(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${inputBgClass}`}>
-                                <option value="">-- Select Variant --</option>
-                                {availableVariants.map(v => <option key={v} value={v}>{v}</option>)}
-                            </select>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Variant / Spec</label>
+                                    <select disabled={!selectedModel} value={selectedVariant} onChange={(e) => setSelectedVariant(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer disabled:opacity-50 ${inputBgClass}`}>
+                                        <option value="">-- Select Variant --</option>
+                                        {availableVariants.map(v => <option key={v} value={v}>{v}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Mfg. Year *</label>
+                                    <select required value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer ${inputBgClass}`}>
+                                        <option value="">-- Select Year --</option>
+                                        {years.map(y => <option key={y} value={y}>{y}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Make *</label>
+                                <input type="text" disabled placeholder="Scan to fill" value={ocrFields?.make || ''} className={`w-full border rounded-xl p-3 text-xs font-medium disabled:opacity-70 ${inputBgClass}`} />
+                            </div>
+                            <div>
+                                <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Model *</label>
+                                <input type="text" disabled placeholder="Scan to fill" value={ocrFields?.model || ''} className={`w-full border rounded-xl p-3 text-xs font-medium disabled:opacity-70 ${inputBgClass}`} />
+                            </div>
+                            <div>
+                                <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Variant / Spec</label>
+                                <input type="text" disabled placeholder="N/A" value={ocrFields?.variant || ''} className={`w-full border rounded-xl p-3 text-xs font-medium disabled:opacity-70 ${inputBgClass}`} />
+                            </div>
+                            <div>
+                                <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Mfg. Year *</label>
+                                <input type="text" disabled placeholder="Scan to fill" value={ocrFields?.year || ''} className={`w-full border rounded-xl p-3 text-xs font-medium disabled:opacity-70 ${inputBgClass}`} />
+                            </div>
                         </div>
-                        <div>
-                            <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Mfg. Year *</label>
-                            <select required disabled={!manualOverride} value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${inputBgClass}`}>
-                                <option value="">-- Select Year --</option>
-                                {years.map(y => <option key={y} value={y}>{y}</option>)}
-                            </select>
-                        </div>
-                    </div>
+                    )}
 
                     <div>
                         <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Insurance Panel</label>
