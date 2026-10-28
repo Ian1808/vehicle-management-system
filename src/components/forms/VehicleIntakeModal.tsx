@@ -34,24 +34,32 @@ function parseGrantText(raw: string): ParsedGrant {
     const result: ParsedGrant = { plate: '', chassis: '', make: '', model: '', variant: '', spec: '', year: '' }
 
     // Known grant labels, in priority order (a line can match several — e.g.
-    // "Tarikh Pendaftaran" is a date label, not the plate label).
+    // "Tarikh Pendaftaran" is a date label, not the plate label). All regexes
+    // MUST be global ("g") — the classification loop relies on exec() advancing
+    // lastIndex; a non-global exec returns the same first match forever.
     const LABELS: Array<{ type: string; re: RegExp }> = [
-        { type: 'TAHUN', re: /(?:TAHUN|DIBUAT)/ },
-        { type: 'TARIKH', re: /TARIKH/ },
-        { type: 'KEUPAYAAN', re: /(?:KUUP|KUASA|KEUPAY)\w*\s*(?:ENJIN)?/ },
-        { type: 'CHASIS', re: /CHASS?IS|CHESIS|ENJIN/ },
-        { type: 'SYARAT', re: /SYARAT/ },
-        { type: 'PENDAFTARAN', re: /PENDAFTARAN/ },
-        { type: 'MODEL', re: /(?:BUATAN|BUSTAN|NAMA|NEMA)\s*MODE[!LI1]*|BUATAN|BUSTAN|MODEL|MODE[!LI1]*/ },
-        { type: 'BAHAN', re: /BAHAN/ },
-        { type: 'STATUS', re: /STATUS/ },
-        { type: 'KELAS', re: /KELAS/ },
-        { type: 'BDM', re: /B\.?\s*D\.?\s*M/ },
-        { type: 'PEMUNYA', re: /PEMUNYA|PENUNYA/ },
-        { type: 'ALAMAT', re: /ALAMAT/ },
-        { type: 'ID', re: /(?:^|[^A-Z0-9])ID(?:$|[^A-Z0-9])/ },
+        { type: 'TAHUN', re: /(?:TAHUN|DIBUAT)/g },
+        { type: 'TARIKH', re: /TARIKH/g },
+        { type: 'KEUPAYAAN', re: /(?:KUUP|KUASA|KEUPAY)\w*\s*(?:ENJIN)?/g },
+        { type: 'CHASIS', re: /CHASS?IS|CHESIS|ENJIN/g },
+        { type: 'SYARAT', re: /SYARAT/g },
+        { type: 'PENDAFTARAN', re: /PENDAFTARAN/g },
+        { type: 'MODEL', re: /(?:BUATAN|BUSTAN|NAMA|NEMA)\s*MODE[!LI1]*|BUATAN|BUSTAN|MODEL|MODE[!LI1]*/g },
+        { type: 'BAHAN', re: /BAHAN/g },
+        { type: 'STATUS', re: /STATUS/g },
+        { type: 'KELAS', re: /KELAS/g },
+        { type: 'BDM', re: /B\.?\s*D\.?\s*M/g },
+        { type: 'PEMUNYA', re: /PEMUNYA|PENUNYA/g },
+        { type: 'ALAMAT', re: /ALAMAT/g },
+        { type: 'ID', re: /(?:^|[^A-Z0-9])ID(?:$|[^A-Z0-9])/g },
     ]
 
+    // Split every line into a label (if it contains a known field name) or a
+    // value. Vision's text order varies per photo — labels may come first as a
+    // block with all values after (with watermark noise lines before them), or
+    // label/value pairs may be interleaved. So each field is extracted by
+    // searching VALUES ordered by proximity to its label, verifying the value
+    // by its SHAPE (plate / VIN / digits / year) rather than by fixed position.
     const labels: string[] = []
     const values: string[] = []
     const cleanValue = (s: string) =>
@@ -76,144 +84,168 @@ function parseGrantText(raw: string): ParsedGrant {
         }
         labels.push(entry.type)
         const tail = cleanValue(line.slice(lastEnd).replace(/^\s*:\s*/, ''))
-        if (tail) values.push(tail)
+        // Only keep the tail as a value when it looks like one: it must not
+        // itself contain another label word ("Syarat Pendaftaran 1" → tail
+        // "Pendaftaran 1" is a label fragment, not a value), and it needs a
+        // digit, a "/" separator, or 2+ words ("Berdaftar"/"Bakar"/"Asal" are
+        // label fragments too).
+        if (tail) {
+            const containsLabel = LABELS.some(l => {
+                l.re.lastIndex = 0
+                return l.re.test(tail)
+            })
+            if (!containsLabel && (/\d/.test(tail) || tail.includes('/') || tail.split(/\s+/).filter(Boolean).length >= 2)) {
+                values.push(tail)
+            }
+        }
     }
 
     const idxOf = (type: string) => labels.lastIndexOf(type)
-    const strip = (s: string) => s.replace(/[^A-Z0-9]/g, '')
+    // Value indices ordered by distance from the label position (-1 = all).
+    const near = (labelIdx: number): number[] => {
+        const idx = Array.from({ length: values.length }, (_, i) => i)
+        if (labelIdx === -1) return idx
+        return idx.sort((a, b) => Math.abs(a - labelIdx) - Math.abs(b - labelIdx))
+    }
+    const isBodyTypeLine = (v: string) => v.includes('MOTOKAR') || v.includes('WINDOW')
 
-    // --- plate: the first value shaped like a registration plate
-    for (const v of values) {
-        const t = v.replace(/\s/g, '')
-        if (/^[A-Z]{1,3}\d{1,4}[A-Z]?$/.test(t)) {
-            result.plate = t
+    // --- plate: the first value containing a plate-shaped token
+    let plateIdx = -1
+    for (let i = 0; i < values.length && plateIdx === -1; i++) {
+        for (const t of values[i].split(/[^A-Z0-9]+/).filter(Boolean)) {
+            if (/^[A-Z]{1,3}\d{1,4}[A-Z]?$/.test(t)) {
+                result.plate = t
+                plateIdx = i
+                break
+            }
+        }
+    }
+
+    // --- chassis: the VIN-shaped token nearest the chassis label (14+ alnum,
+    // letters AND digits, found inside the line). Chassis+engine often merge
+    // without a separator, so keep the first 17 chars (standard VIN length).
+    const chassisLabelIdx = idxOf('CHASIS')
+    let chassisIdx = -1
+    for (const i of near(chassisLabelIdx)) {
+        const v = values[i]
+        // The part before a "/" separator is the chassis when engine number
+        // shares the line; OCR junk may also prefix the VIN on the same line.
+        const m = v.split('/')[0].match(/(?:^|[^A-Z0-9])([A-Z][A-Z0-9]{13,})(?:$|[^A-Z0-9])/)
+        if (!m) continue
+        const t = m[1]
+        const c = t.length > 18 ? t.slice(0, 17) : t
+        if (/[A-Z]/.test(c) && /\d/.test(c)) {
+            result.chassis = c
+            chassisIdx = i
             break
         }
     }
 
-    // --- chassis: a VIN-shaped value (12+ alnum, letters AND digits, ≤2
-    // tokens) near the chassis label. Handles chassis+engine merged without a
-    // separator by keeping the first 17 chars (standard VIN length).
-    const chassisLabelIdx = idxOf('CHASIS')
-    if (chassisLabelIdx !== -1) {
-        let bestC = ''
-        let bestDist = Infinity
-        for (let d = 0; d <= 3 && !bestC; d++) {
-            for (const i of [chassisLabelIdx - d, chassisLabelIdx + d]) {
-                if (i < 0 || i >= values.length) continue
-                const v = values[i]
-                if (v.split(/\s+/).filter(t => t !== '/').length > 2) continue
-                const t = strip(v.split('/')[0])
-                const c = t.length > 18 ? t.slice(0, 17) : t
-                if (c.length >= 12 && /[A-Z]/.test(c) && /\d/.test(c) && Math.abs(i - chassisLabelIdx) < bestDist) {
-                    bestC = c
-                    bestDist = Math.abs(i - chassisLabelIdx)
-                }
-            }
-        }
-        result.chassis = bestC
-    }
-    if (!result.chassis) {
-        for (const v of values) {
-            if (v.split(/\s+/).filter(t => t !== '/').length > 2) continue
-            const t = strip(v.split('/')[0])
-            if (t.length >= 12 && /[A-Z]/.test(t) && /\d/.test(t)) {
-                result.chassis = t.length > 18 ? t.slice(0, 17) : t
-                break
-            }
-        }
-    }
-
-    // --- make/model: the value near the MODEL label that starts with a known
-    // make (or contains a "/" make-model separator)
-    let mmValIdx = -1
+    // --- make/model: prefer the value nearest the MODEL label that starts
+    // with a known make; only if none exists, fall back to a proximity score.
     const mmLabelIdx = idxOf('MODEL')
-    if (mmLabelIdx !== -1) {
-        const rankedMakes = [...getVehicleMakes()].sort((a, b) => normalizeKey(b).length - normalizeKey(a).length)
-        let bestScore = -Infinity
-        for (let d = 0; d <= 3; d++) {
-            for (const i of [mmLabelIdx - d, mmLabelIdx + d]) {
-                if (i < 0 || i >= values.length) continue
-                const v = values[i]
-                const tokens = v.split(/\s+/).filter(Boolean)
-                if (tokens.length < 2) continue
-                if (/^\d+$/.test(v.replace(/[^0-9]/g, ''))) continue
-                const norm = normalizeKey(v)
-                let score = -d * 0.5
-                if (rankedMakes.some(mk => norm.startsWith(normalizeKey(mk)))) score += 3
-                if (v.includes('/')) score += 1.5
-                if (tokens.length <= 5) score += 1
-                if (score > bestScore) {
-                    bestScore = score
-                    mmValIdx = i
-                }
-            }
-        }
-        if (mmValIdx !== -1) {
-            const v = values[mmValIdx]
-            const parts = v.split('/').map(s => s.trim()).filter(Boolean)
-            if (parts.length >= 2) {
-                result.make = parts[0]
-                result.model = parts.slice(1).join(' / ')
-            } else {
-                const tk = v.split(/\s+/).filter(Boolean)
-                result.make = tk[0]
-                result.model = tk.slice(1).join(' ')
+    let mmValIdx = -1
+    const mmCandidates = near(mmLabelIdx)
+        .map(i => ({ i, v: values[i] }))
+        .filter(({ v }) => {
+            const tokens = v.split(/\s+/).filter(Boolean)
+            // 2+ words, and not an all-digits line (ID number / capacity).
+            return tokens.length >= 2 && !/^[0-9\s]+$/.test(v)
+        })
+    const rankedMakes = [...getVehicleMakes()].sort((a, b) => normalizeKey(b).length - normalizeKey(a).length)
+    let knownHit: { i: number; v: string } | null = null
+    let knownDist = Infinity
+    for (const c of mmCandidates) {
+        const norm = normalizeKey(c.v)
+        if (rankedMakes.some(mk => norm.startsWith(normalizeKey(mk)))) {
+            const d = mmLabelIdx === -1 ? c.i : Math.abs(c.i - mmLabelIdx)
+            if (d < knownDist) {
+                knownDist = d
+                knownHit = c
             }
         }
     }
+    const mmHit = knownHit ?? mmCandidates.reduce<{ i: number; v: string; score: number } | null>(
+        (best, c) => {
+            const d = mmLabelIdx === -1 ? c.i : Math.abs(c.i - mmLabelIdx)
+            let score = -d * 0.5
+            if (c.v.includes('/')) score += 1.5
+            if (c.v.split(/\s+/).length <= 5) score += 1
+            return !best || score > best.score ? { ...c, score } : best
+        },
+        null
+    )
+    if (mmHit) {
+        mmValIdx = mmHit.i
+        const parts = mmHit.v.split('/').map(s => s.trim()).filter(Boolean)
+        if (parts.length >= 2) {
+            result.make = parts[0]
+            result.model = parts.slice(1).join(' / ')
+        } else {
+            const tk = mmHit.v.split(/\s+/).filter(Boolean)
+            result.make = tk[0]
+            result.model = tk.slice(1).join(' ')
+        }
+    }
 
-    // --- spec: 3-4 digit engine capacity near the KEUPAYAAN label (OCR
-    // sometimes prepends a junk digit, e.g. "11799" for 1799). The value used
-    // for make/model is excluded ("S400L" must not become the capacity).
+    // --- spec: engine capacity near the KEUPAYAAN label. Values already
+    // claimed by plate/chassis/make-model and body-type lines are excluded.
+    // Prefer a STANDALONE digit line ("3498") over digits embedded in an
+    // address ("977 JALAN ... 6 ..."), and OCR sometimes prepends a junk
+    // digit ("11799" for 1799) — then the last 4 digits of the label's own
+    // line are used.
     const specLabelIdx = idxOf('KEUPAYAAN')
-    if (specLabelIdx !== -1) {
-        for (let d = 0; d <= 3 && !result.spec; d++) {
-            for (const i of [specLabelIdx - d, specLabelIdx + d]) {
-                if (i < 0 || i >= values.length || i === mmValIdx) continue
-                const digits = values[i].replace(/[^0-9]/g, '')
-                if (digits.length === 3 || digits.length === 4) {
-                    result.spec = digits
-                    break
-                }
-                if (digits.length === 5) {
-                    result.spec = digits.slice(-4)
-                    break
-                }
+    const specSkip = (i: number) =>
+        i === plateIdx || i === mmValIdx || i === chassisIdx || isBodyTypeLine(values[i])
+    let specValIdx = -1
+    const standaloneDigits = (v: string) => /^[0-9\s]+$/.test(v)
+    for (const i of near(specLabelIdx)) {
+        if (specSkip(i)) continue
+        const v = values[i]
+        const digits = v.replace(/[^0-9]/g, '')
+        if ((digits.length === 3 || digits.length === 4) && standaloneDigits(v)) {
+            result.spec = digits
+            specValIdx = i
+            break
+        }
+    }
+    if (!result.spec) {
+        for (const i of near(specLabelIdx)) {
+            if (specSkip(i)) continue
+            const digits = values[i].replace(/[^0-9]/g, '')
+            if (digits.length === 3 || digits.length === 4) {
+                result.spec = digits
+                specValIdx = i
+                break
             }
         }
     }
     if (!result.spec) {
-        for (let i = 0; i < values.length; i++) {
-            if (i === mmValIdx) continue
+        for (const i of near(specLabelIdx)) {
+            if (specSkip(i)) continue
             const digits = values[i].replace(/[^0-9]/g, '')
-            if (digits.length === 3 || digits.length === 4) {
-                result.spec = digits
-                break
-            }
-            if (digits.length === 5) {
+            if (digits.length !== 5) continue
+            const d = specLabelIdx === -1 ? i : Math.abs(i - specLabelIdx)
+            if (d <= 1) {
                 result.spec = digits.slice(-4)
+                specValIdx = i
                 break
             }
         }
     }
 
-    // --- year: a standalone 19xx/20xx token near the TAHUN label (never a date)
-    const findYear = (from: number, to: number) => {
-        for (let i = from; i <= to; i++) {
-            const v = values[i] || ''
-            if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(v)) continue
-            const m = v.match(/(?:^|[^0-9])((?:19|20)\d{2})(?:$|[^0-9])/)
-            if (m) return m[1]
-        }
-        return ''
-    }
+    // --- year: the standalone 19xx/20xx token nearest the TAHUN label (never
+    // a date, never a value already claimed by another field).
     const yearLabelIdx = idxOf('TAHUN')
-    if (yearLabelIdx !== -1) {
-        result.year = findYear(Math.max(0, yearLabelIdx - 2), Math.min(values.length - 1, yearLabelIdx + 3))
-    }
-    if (!result.year) {
-        result.year = findYear(0, values.length - 1)
+    for (const i of near(yearLabelIdx)) {
+        if (i === plateIdx || i === mmValIdx || i === chassisIdx || i === specValIdx) continue
+        const v = values[i] || ''
+        if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(v)) continue
+        const m = v.match(/(?:^|[^0-9])((?:19|20)\d{2})(?:$|[^0-9])/)
+        if (m) {
+            result.year = m[1]
+            break
+        }
     }
 
     // Variant = everything after the base model name, e.g. "CIVIC 1.8L I-VTEC (A)" → "1.8L I-VTEC (A)".
@@ -329,22 +361,30 @@ async function compressForCloud(file: File): Promise<string> {
 // Calls the server route that proxies to Google Cloud Vision. Returns
 // { parsed } on a successful scan, { unavailable: true } when the route
 // reports no key / an API error (so the UI can hint at setup), or null when
-// the scan itself failed (no text) and the offline fallback should run.
+// the scan itself failed (no text / timeout) and the offline fallback should
+// run. A 25s timeout guarantees the scanner can never spin forever.
 async function tryCloudOcr(file: File): Promise<{ parsed: ParsedGrant } | { unavailable: true } | null> {
     try {
         const imageBase64 = await compressForCloud(file)
-        const res = await fetch('/api/ocr/grant', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageBase64 }),
-        })
-        if (res.status === 503 || res.status === 502) return { unavailable: true }
-        if (!res.ok) return null
-        const data = await res.json()
-        if (!data?.text) return null
-        const parsed = parseGrantText(data.text)
-        if (scoreGrant(parsed) === 0) return null
-        return { parsed }
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 25000)
+        try {
+            const res = await fetch('/api/ocr/grant', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageBase64 }),
+                signal: controller.signal,
+            })
+            if (res.status === 503 || res.status === 502) return { unavailable: true }
+            if (!res.ok) return null
+            const data = await res.json()
+            if (!data?.text) return null
+            const parsed = parseGrantText(data.text)
+            if (scoreGrant(parsed) === 0) return null
+            return { parsed }
+        } finally {
+            clearTimeout(timer)
+        }
     } catch {
         return null
     }
