@@ -112,41 +112,70 @@ function parseGrantText(raw: string): ParsedGrant {
     return result
 }
 
-// Upscales and grayscales the photo before OCR — Tesseract reads high-contrast
-// images far more reliably than the original pink textured certificate.
-async function preprocessImage(file: File): Promise<Blob | File> {
+// Decodes the photo once and returns four grayscale, upscaled variants
+// (0°/90°/180°/270°) so OCR can be tried in every orientation.
+type GrantVariant = { blob: Blob | File; rotation: 0 | 90 | 180 | 270 }
+
+async function makeGrantVariants(file: File): Promise<GrantVariant[]> {
     try {
         const bitmap = await createImageBitmap(file)
         const scale = 2
-        const w = Math.round(bitmap.width * scale)
-        const h = Math.round(bitmap.height * scale)
-        const canvas = document.createElement('canvas')
-        canvas.width = w
-        canvas.height = h
-        const ctx = canvas.getContext('2d')
-        if (!ctx) {
-            bitmap.close()
-            return file
+        const baseW = bitmap.width
+        const baseH = bitmap.height
+        const rotations: Array<0 | 90 | 180 | 270> = [0, 90, 180, 270]
+        const variants: GrantVariant[] = []
+        for (const rotation of rotations) {
+            const swapped = rotation === 90 || rotation === 270
+            const w = Math.round((swapped ? baseH : baseW) * scale)
+            const h = Math.round((swapped ? baseW : baseH) * scale)
+            const canvas = document.createElement('canvas')
+            canvas.width = w
+            canvas.height = h
+            const ctx = canvas.getContext('2d')
+            if (!ctx) {
+                variants.push({ blob: file, rotation })
+                continue
+            }
+            ctx.fillStyle = '#ffffff'
+            ctx.fillRect(0, 0, w, h)
+            ctx.translate(w / 2, h / 2)
+            ctx.rotate((rotation * Math.PI) / 180)
+            ctx.drawImage(bitmap, (-baseW * scale) / 2, (-baseH * scale) / 2, baseW * scale, baseH * scale)
+            const imageData = ctx.getImageData(0, 0, w, h)
+            const d = imageData.data
+            for (let i = 0; i < d.length; i += 4) {
+                const gray = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
+                d[i] = gray
+                d[i + 1] = gray
+                d[i + 2] = gray
+            }
+            ctx.putImageData(imageData, 0, 0)
+            const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+            variants.push({ blob: blob ?? file, rotation })
         }
-        ctx.fillStyle = '#ffffff'
-        ctx.fillRect(0, 0, w, h)
-        ctx.drawImage(bitmap, 0, 0, w, h)
         bitmap.close()
-        const imageData = ctx.getImageData(0, 0, w, h)
-        const d = imageData.data
-        for (let i = 0; i < d.length; i += 4) {
-            const gray = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
-            d[i] = gray
-            d[i + 1] = gray
-            d[i + 2] = gray
-        }
-        ctx.putImageData(imageData, 0, 0)
-        return await new Promise<Blob>((resolve, reject) => {
-            canvas.toBlob(b => (b ? resolve(b) : reject(new Error('Canvas export failed'))), 'image/png')
-        })
+        return variants
     } catch {
-        return file
+        return [
+            { blob: file, rotation: 0 },
+            { blob: file, rotation: 90 },
+            { blob: file, rotation: 180 },
+            { blob: file, rotation: 270 },
+        ]
     }
+}
+
+// Higher = the OCR result looks more like a readable grant. Used to pick the
+// best rotation and to stop early when the upright pass already parsed well.
+function scoreGrant(p: ParsedGrant): number {
+    let s = 0
+    if (p.plate) s += 2
+    if (p.chassis) s += 2
+    if (p.make) s += 1
+    if (p.model) s += 1
+    if (p.year) s += 1
+    if (p.spec) s += 1
+    return s
 }
 
 function matchOption(options: string[], target: string): string | null {
@@ -192,6 +221,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     const [intakeCost, setIntakeCost] = useState('')
     const [ocrBusy, setOcrBusy] = useState(false)
     const [ocrStatus, setOcrStatus] = useState('')
+    const [ocrPass, setOcrPass] = useState(0)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     if (!isOpen) return null
@@ -207,8 +237,9 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     }
 
     // Auto-fill form fields from OCR-parsed grant details (best-effort; user reviews before saving).
-    function applyParsed(parsed: ParsedGrant) {
+    function applyParsed(parsed: ParsedGrant, rotation: number) {
         const notes: string[] = []
+        if (rotation !== 0) notes.push(`Rotated ${rotation}°`)
 
         if (parsed.plate) {
             setPlate(parsed.plate)
@@ -267,22 +298,32 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         try {
             const { createWorker } = await import('tesseract.js')
             const worker = await createWorker('eng')
-            setOcrStatus('reading')
-            const image = await preprocessImage(file)
-            const { data } = await worker.recognize(image)
+            const variants = await makeGrantVariants(file)
+            let best: { parsed: ParsedGrant; rotation: number } | null = null
+            for (let i = 0; i < variants.length; i++) {
+                setOcrStatus('reading')
+                setOcrPass(i + 1)
+                const { data } = await worker.recognize(variants[i].blob)
+                const parsed = parseGrantText(data.text)
+                const score = scoreGrant(parsed)
+                if (!best || score > scoreGrant(best.parsed)) {
+                    best = { parsed, rotation: variants[i].rotation }
+                }
+                if (score >= 5) break // this orientation parsed well — no need to try the rest
+            }
             await worker.terminate()
             setOcrStatus('parsing')
-            const parsed = parseGrantText(data.text)
-            if (!parsed.plate && !parsed.chassis && !parsed.make && !parsed.year) {
-                showToast('Could not read vehicle details from this photo. Make sure the certificate is upright, in focus, and well lit.', 'error')
+            if (!best || scoreGrant(best.parsed) === 0) {
+                showToast('Could not read vehicle details from this photo. Make sure the certificate is in focus and well lit.', 'error')
                 return
             }
-            applyParsed(parsed)
+            applyParsed(best.parsed, best.rotation)
         } catch {
             showToast('Photo scan failed. Please fill in the details manually.', 'error')
         } finally {
             setOcrBusy(false)
             setOcrStatus('')
+            setOcrPass(0)
         }
     }
 
@@ -343,11 +384,11 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                         </button>
                         {ocrBusy && (
                             <p className={`text-[10px] font-bold mt-2 ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>
-                                {ocrStatus === 'loading' ? '⏳ Preparing OCR engine (first scan downloads ~15 MB, please wait)…' : ocrStatus === 'reading' ? '📖 Reading text from photo…' : '✨ Filling in fields…'}
+                                {ocrStatus === 'loading' ? '⏳ Preparing OCR engine (first scan downloads ~15 MB, please wait)…' : ocrStatus === 'reading' ? (ocrPass > 1 ? `📖 Reading text from photo (pass ${ocrPass}/4 — trying orientations)…` : '📖 Reading text from photo…') : '✨ Filling in fields…'}
                             </p>
                         )}
                         <p className={`text-[10px] font-medium mt-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                            Upload a photo of the vehicle grant (SIJIL PEMILIKAN KENDERAAN) to auto-fill plate, chassis, make, model, spec &amp; year — keep the certificate upright. Review the fields before saving.
+                            Upload a photo of the vehicle grant (SIJIL PEMILIKAN KENDERAAN) to auto-fill plate, chassis, make, model, spec &amp; year — any orientation works. Review the fields before saving.
                         </p>
                     </div>
 
