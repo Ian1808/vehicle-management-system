@@ -19,8 +19,11 @@ function normalizeKey(s: string) {
 }
 
 // Parses OCR text from a Malaysian vehicle grant (SIJIL PEMILIKAN KENDERAAN).
-// Works line-by-line with fuzzy label matching because Tesseract often
-// mangles the Malay field names — a value may also sit on the next line.
+// Both OCR engines (Google Vision, Tesseract) mangle the Malay labels and can
+// return the label column and value column as separate blocks, as interleaved
+// rows, or as mangled single lines. Strategy: classify every line as a known
+// label or a value, then find each field's value NEAR its label's position,
+// verifying it by the value's distinctive SHAPE (plate / VIN / digits / year).
 function parseGrantText(raw: string): ParsedGrant {
     const lines = raw
         .toUpperCase()
@@ -30,117 +33,187 @@ function parseGrantText(raw: string): ParsedGrant {
         .filter(Boolean)
     const result: ParsedGrant = { plate: '', chassis: '', make: '', model: '', variant: '', spec: '', year: '' }
 
-    const findValue = (linePredicate: (l: string) => boolean, valuePattern: RegExp): string => {
-        for (let i = 0; i < lines.length; i++) {
-            if (!linePredicate(lines[i])) continue
-            for (let j = 0; j <= 2; j++) {
-                const m = (lines[i + j] || '').match(valuePattern)
-                if (m) return m[1]
-            }
-            return ''
+    // Known grant labels, in priority order (a line can match several — e.g.
+    // "Tarikh Pendaftaran" is a date label, not the plate label).
+    const LABELS: Array<{ type: string; re: RegExp }> = [
+        { type: 'TAHUN', re: /(?:TAHUN|DIBUAT)/ },
+        { type: 'TARIKH', re: /TARIKH/ },
+        { type: 'KEUPAYAAN', re: /(?:KUUP|KUASA|KEUPAY)\w*\s*(?:ENJIN)?/ },
+        { type: 'CHASIS', re: /CHASS?IS|CHESIS|ENJIN/ },
+        { type: 'SYARAT', re: /SYARAT/ },
+        { type: 'PENDAFTARAN', re: /PENDAFTARAN/ },
+        { type: 'MODEL', re: /(?:BUATAN|BUSTAN|NAMA|NEMA)\s*MODE[!LI1]*|BUATAN|BUSTAN|MODEL|MODE[!LI1]*/ },
+        { type: 'BAHAN', re: /BAHAN/ },
+        { type: 'STATUS', re: /STATUS/ },
+        { type: 'KELAS', re: /KELAS/ },
+        { type: 'BDM', re: /B\.?\s*D\.?\s*M/ },
+        { type: 'PEMUNYA', re: /PEMUNYA|PENUNYA/ },
+        { type: 'ALAMAT', re: /ALAMAT/ },
+        { type: 'ID', re: /(?:^|[^A-Z0-9])ID(?:$|[^A-Z0-9])/ },
+    ]
+
+    const labels: string[] = []
+    const values: string[] = []
+    const cleanValue = (s: string) =>
+        s.replace(/[^A-Z0-9 .()/-]/g, ' ').replace(/\s+/g, ' ').trim()
+    for (const line of lines) {
+        const entry = LABELS.find(l => {
+            l.re.lastIndex = 0
+            return l.re.test(line)
+        })
+        if (!entry) {
+            values.push(cleanValue(line.replace(/^\s*:\s*/, '')))
+            continue
         }
-        return ''
+        // Inline value ("LABEL : VALUE" or "LABEL VALUE") = text after the
+        // LAST label keyword occurrence on the line.
+        let lastEnd = -1
+        entry.re.lastIndex = 0
+        let m: RegExpExecArray | null
+        while ((m = entry.re.exec(line)) !== null) {
+            lastEnd = m.index + m[0].length
+            if (entry.re.lastIndex === m.index) entry.re.lastIndex++
+        }
+        labels.push(entry.type)
+        const tail = cleanValue(line.slice(lastEnd).replace(/^\s*:\s*/, ''))
+        if (tail) values.push(tail)
     }
 
-    // --- Plate: everything after the "PENDAFTARAN" label (may wrap to the
-    // next line). Cut first so OCR noise before the label can't match.
-    const plateLineIdx = lines.findIndex(l => l.includes('PENDAFTARAN') && !l.includes('TARIKH'))
-    if (plateLineIdx !== -1) {
-        let plateVal = lines[plateLineIdx].slice(lines[plateLineIdx].indexOf('PENDAFTARAN') + 'PENDAFTARAN'.length)
-        if (!/[A-Z0-9]/.test(plateVal) && lines[plateLineIdx + 1]) {
-            plateVal = (plateVal + ' ' + lines[plateLineIdx + 1]).trim()
+    const idxOf = (type: string) => labels.lastIndexOf(type)
+    const strip = (s: string) => s.replace(/[^A-Z0-9]/g, '')
+
+    // --- plate: the first value shaped like a registration plate
+    for (const v of values) {
+        const t = v.replace(/\s/g, '')
+        if (/^[A-Z]{1,3}\d{1,4}[A-Z]?$/.test(t)) {
+            result.plate = t
+            break
         }
-        const plateMatch = plateVal.match(/^[^A-Z0-9]*([A-Z]{1,3}\s?\d{1,4}[A-Z]?)/)
-        if (plateMatch) result.plate = plateMatch[1].replace(/\s/g, '')
     }
 
-    // --- Chassis/VIN: the value sits after "ENJIN" (when the chassis and
-    // engine numbers share one line) or after the CHASIS label, before the
-    // "/" that separates chassis from engine number. Handles OCR mangling
-    // the label ("CHASTS"), inserting spaces in the VIN, or dropping the "/".
-    const chassisIdx = lines.findIndex(l => l.includes('CHAS'))
-    if (chassisIdx !== -1) {
-        const chassisLine = lines[chassisIdx]
-        let val = ''
-        if (chassisLine.includes('ENJIN')) {
-            val = chassisLine.slice(chassisLine.indexOf('ENJIN') + 5)
-            if (!/[A-Z0-9]{8,}/.test(val) && lines[chassisIdx + 1]) {
-                val = (val + ' ' + lines[chassisIdx + 1]).trim()
-            }
-        } else {
-            const ci = Math.max(chassisLine.lastIndexOf('CHASSIS'), chassisLine.lastIndexOf('CHASIS'))
-            if (ci !== -1) {
-                val = chassisLine.slice(ci + 7)
-                if (!/[A-Z0-9]{8,}/.test(val) && lines[chassisIdx + 1]) {
-                    val = (val + ' ' + lines[chassisIdx + 1]).trim()
+    // --- chassis: a VIN-shaped value (12+ alnum, letters AND digits, ≤2
+    // tokens) near the chassis label. Handles chassis+engine merged without a
+    // separator by keeping the first 17 chars (standard VIN length).
+    const chassisLabelIdx = idxOf('CHASIS')
+    if (chassisLabelIdx !== -1) {
+        let bestC = ''
+        let bestDist = Infinity
+        for (let d = 0; d <= 3 && !bestC; d++) {
+            for (const i of [chassisLabelIdx - d, chassisLabelIdx + d]) {
+                if (i < 0 || i >= values.length) continue
+                const v = values[i]
+                if (v.split(/\s+/).filter(t => t !== '/').length > 2) continue
+                const t = strip(v.split('/')[0])
+                const c = t.length > 18 ? t.slice(0, 17) : t
+                if (c.length >= 12 && /[A-Z]/.test(c) && /\d/.test(c) && Math.abs(i - chassisLabelIdx) < bestDist) {
+                    bestC = c
+                    bestDist = Math.abs(i - chassisLabelIdx)
                 }
             }
         }
-        const firstPart = val.split('/')[0].replace(/[^A-Z0-9]/g, '')
-        const chassisMatch = firstPart.match(/[A-Z]{2,5}\d{4,}[A-Z]{1,4}\d{3,6}/) || firstPart.match(/[A-Z0-9]{12,18}/)
-        if (chassisMatch) result.chassis = chassisMatch[0]
+        result.chassis = bestC
     }
-    // If the label itself was mangled beyond recognition ("NE ONA IN"), fall
-    // back to scanning every line for a delimited letter-starting token of
-    // 12-18 chars that also contains a digit — VINs look like that, while the
-    // ID number (digits only), dates and short words do not.
     if (!result.chassis) {
-        for (const line of lines) {
-            const m = line.match(/(?:^|[^A-Z0-9])([A-Z][A-Z0-9]{11,17})(?:$|[^A-Z0-9])/)
-            if (m && /\d/.test(m[1])) {
-                result.chassis = m[1]
+        for (const v of values) {
+            if (v.split(/\s+/).filter(t => t !== '/').length > 2) continue
+            const t = strip(v.split('/')[0])
+            if (t.length >= 12 && /[A-Z]/.test(t) && /\d/.test(t)) {
+                result.chassis = t.length > 18 ? t.slice(0, 17) : t
                 break
             }
         }
     }
 
-    result.year = findValue(
-        l => l.includes('TAHUN') || l.includes('DIBUAT'),
-        /((?:19|20)\d{2})/
-    )
-    result.spec = findValue(
-        l => (l.includes('KUUP') || l.includes('KUASA') || l.includes('KEUPAYAAN') || l.includes('KEUPAYAN')) && l.includes('ENJIN'),
-        /(\d{3,4})/
-    )
-
-    // --- Make/Model: cut everything before the model label, keep the value.
-    // Join the next line only when the value looks incomplete (no "/" pair).
-    const mmLineIdx = lines.findIndex(l => l.includes('BUATAN') || l.includes('NAMA MODEL') || l.includes('MODEL'))
-    if (mmLineIdx !== -1) {
-        let mmText = lines[mmLineIdx]
-        const labelEnd = Math.max(mmText.lastIndexOf('NAMA MODEL'), mmText.lastIndexOf('BUATAN'), mmText.lastIndexOf('MODEL'))
-        if (labelEnd !== -1) {
-            mmText = mmText.slice(labelEnd)
-        }
-        const rawVal = mmText.replace(/BUATAN|NAMA MODEL|MODEL/g, ' ')
-        if (!/[A-Z0-9]+\s*\/\s*[A-Z0-9]/.test(rawVal)) {
-            for (let k = 1; k <= 2 && lines[mmLineIdx + k]; k++) {
-                const extra = lines[mmLineIdx + k]
-                mmText = mmText + ' ' + extra
-                if (/[A-Z0-9]+\s*\/\s*[A-Z0-9]/.test(rawVal + ' ' + extra)) break
+    // --- make/model: the value near the MODEL label that starts with a known
+    // make (or contains a "/" make-model separator)
+    let mmValIdx = -1
+    const mmLabelIdx = idxOf('MODEL')
+    if (mmLabelIdx !== -1) {
+        const rankedMakes = [...getVehicleMakes()].sort((a, b) => normalizeKey(b).length - normalizeKey(a).length)
+        let bestScore = -Infinity
+        for (let d = 0; d <= 3; d++) {
+            for (const i of [mmLabelIdx - d, mmLabelIdx + d]) {
+                if (i < 0 || i >= values.length) continue
+                const v = values[i]
+                const tokens = v.split(/\s+/).filter(Boolean)
+                if (tokens.length < 2) continue
+                if (/^\d+$/.test(v.replace(/[^0-9]/g, ''))) continue
+                const norm = normalizeKey(v)
+                let score = -d * 0.5
+                if (rankedMakes.some(mk => norm.startsWith(normalizeKey(mk)))) score += 3
+                if (v.includes('/')) score += 1.5
+                if (tokens.length <= 5) score += 1
+                if (score > bestScore) {
+                    bestScore = score
+                    mmValIdx = i
+                }
             }
         }
-        mmText = mmText
-            .replace(/BUATAN/g, ' ')
-            .replace(/NAMA MODEL/g, ' ')
-            .replace(/MODEL/g, ' ')
-            .trim()
-            .replace(/^[^A-Z0-9]+/, '')
-            .trim()
-        mmText = mmText.split(/\s+(?:KUUP|KUASA|KEUPAYAAN|KEUPAYAN|BAHAN|PEMASANGAN|KELAS|JENIS|TARIKH|SYARAT|STATUS|B\.?D\.?)/)[0].trim()
-        const mmParts = mmText.split('/').map(s => s.trim()).filter(Boolean)
-        if (mmParts.length >= 2) {
-            result.make = mmParts[0]
-            result.model = mmParts.slice(1).join(' / ')
-        } else {
-            const tokens = mmText.split(/\s+/).filter(Boolean)
-            if (tokens.length >= 2) {
-                result.make = tokens[0]
-                result.model = tokens.slice(1).join(' ')
+        if (mmValIdx !== -1) {
+            const v = values[mmValIdx]
+            const parts = v.split('/').map(s => s.trim()).filter(Boolean)
+            if (parts.length >= 2) {
+                result.make = parts[0]
+                result.model = parts.slice(1).join(' / ')
             } else {
-                result.model = tokens[0] || ''
+                const tk = v.split(/\s+/).filter(Boolean)
+                result.make = tk[0]
+                result.model = tk.slice(1).join(' ')
             }
         }
+    }
+
+    // --- spec: 3-4 digit engine capacity near the KEUPAYAAN label (OCR
+    // sometimes prepends a junk digit, e.g. "11799" for 1799). The value used
+    // for make/model is excluded ("S400L" must not become the capacity).
+    const specLabelIdx = idxOf('KEUPAYAAN')
+    if (specLabelIdx !== -1) {
+        for (let d = 0; d <= 3 && !result.spec; d++) {
+            for (const i of [specLabelIdx - d, specLabelIdx + d]) {
+                if (i < 0 || i >= values.length || i === mmValIdx) continue
+                const digits = values[i].replace(/[^0-9]/g, '')
+                if (digits.length === 3 || digits.length === 4) {
+                    result.spec = digits
+                    break
+                }
+                if (digits.length === 5) {
+                    result.spec = digits.slice(-4)
+                    break
+                }
+            }
+        }
+    }
+    if (!result.spec) {
+        for (let i = 0; i < values.length; i++) {
+            if (i === mmValIdx) continue
+            const digits = values[i].replace(/[^0-9]/g, '')
+            if (digits.length === 3 || digits.length === 4) {
+                result.spec = digits
+                break
+            }
+            if (digits.length === 5) {
+                result.spec = digits.slice(-4)
+                break
+            }
+        }
+    }
+
+    // --- year: a standalone 19xx/20xx token near the TAHUN label (never a date)
+    const findYear = (from: number, to: number) => {
+        for (let i = from; i <= to; i++) {
+            const v = values[i] || ''
+            if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(v)) continue
+            const m = v.match(/(?:^|[^0-9])((?:19|20)\d{2})(?:$|[^0-9])/)
+            if (m) return m[1]
+        }
+        return ''
+    }
+    const yearLabelIdx = idxOf('TAHUN')
+    if (yearLabelIdx !== -1) {
+        result.year = findYear(Math.max(0, yearLabelIdx - 2), Math.min(values.length - 1, yearLabelIdx + 3))
+    }
+    if (!result.year) {
+        result.year = findYear(0, values.length - 1)
     }
 
     // Variant = everything after the base model name, e.g. "CIVIC 1.8L I-VTEC (A)" → "1.8L I-VTEC (A)".
@@ -228,6 +301,53 @@ function matchOption(options: string[], target: string): string | null {
         .sort((a, b) => normalizeKey(b).length - normalizeKey(a).length)
     if (contained.length) return contained[0]
     return options.find(o => normalizeKey(o).includes(t)) || null
+}
+
+// Downsizes the photo to a compact JPEG for the cloud path. Google Vision
+// rotates the document itself, so no 4-orientation variants are needed here.
+// Quality stays high (0.95) — aggressive JPEG compression made Vision misread
+// "I-VTEC" as "1-VTEC" on the pink certificate background.
+async function compressForCloud(file: File): Promise<string> {
+    const bitmap = await createImageBitmap(file)
+    const MAX = 2000
+    const scale = Math.min(1, MAX / Math.max(bitmap.width, bitmap.height))
+    const w = Math.max(1, Math.round(bitmap.width * scale))
+    const h = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('no 2d context')
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, w, h)
+    ctx.drawImage(bitmap, 0, 0, w, h)
+    bitmap.close?.()
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
+    return dataUrl.slice(dataUrl.indexOf(',') + 1)
+}
+
+// Calls the server route that proxies to Google Cloud Vision. Returns
+// { parsed } on a successful scan, { unavailable: true } when the route
+// reports no key / an API error (so the UI can hint at setup), or null when
+// the scan itself failed (no text) and the offline fallback should run.
+async function tryCloudOcr(file: File): Promise<{ parsed: ParsedGrant } | { unavailable: true } | null> {
+    try {
+        const imageBase64 = await compressForCloud(file)
+        const res = await fetch('/api/ocr/grant', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64 }),
+        })
+        if (res.status === 503 || res.status === 502) return { unavailable: true }
+        if (!res.ok) return null
+        const data = await res.json()
+        if (!data?.text) return null
+        const parsed = parseGrantText(data.text)
+        if (scoreGrant(parsed) === 0) return null
+        return { parsed }
+    } catch {
+        return null
+    }
 }
 
 type Props = {
@@ -356,7 +476,8 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
             }
         }
 
-        showToast(`Grant scanned ✓ ${notes.join(' · ')}. Review before saving.`, 'success')
+        const needsDigitCheck = Boolean(parsed.chassis || parsed.spec)
+        showToast(`Grant scanned ✓ ${notes.join(' · ')}. ${needsDigitCheck ? 'Verify VIN & engine digits before saving.' : 'Review before saving.'}`, 'success')
     }
 
     async function handleGrantFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -364,8 +485,21 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         e.target.value = ''
         if (!file) return
         setOcrBusy(true)
-        setOcrStatus('loading')
+        let cloudUnavailable = false
         try {
+            // 1) Cloud OCR first (Google Vision) — far more accurate on grants.
+            setOcrStatus('reading')
+            const cloudResult = await tryCloudOcr(file)
+            if (cloudResult && 'parsed' in cloudResult) {
+                if (!isOpenRef.current) return
+                setOcrStatus('parsing')
+                applyParsed(cloudResult.parsed, 0)
+                return
+            }
+            cloudUnavailable = cloudResult !== null && 'unavailable' in cloudResult
+
+            // 2) Offline Tesseract fallback (tries 0°/90°/180°/270°).
+            setOcrStatus('loading')
             const { createWorker } = await import('tesseract.js')
             if (!isOpenRef.current) return
             const worker = await createWorker('eng')
@@ -390,7 +524,11 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
             if (!isOpenRef.current) return
             setOcrStatus('parsing')
             if (!best || scoreGrant(best.parsed) === 0) {
-                showToast('Could not read vehicle details from this photo. Make sure the certificate is in focus and well lit.', 'error')
+                if (cloudUnavailable) {
+                    showToast('Google Vision is unavailable (check the API key in .env.local) and the offline scan could not read this photo either. Please fill in the details manually.', 'error')
+                } else {
+                    showToast('Could not read vehicle details from this photo. Make sure the certificate is in focus and well lit.', 'error')
+                }
                 return
             }
             applyParsed(best.parsed, best.rotation)
