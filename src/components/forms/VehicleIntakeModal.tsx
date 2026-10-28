@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useJPJPlate } from '@/hooks/useJPJPlate'
 import { getVehicleMakes, getModelsForMake, getYearsForVehicle, getVariantsForModel } from '@/services/vehicleDatabaseService'
 
@@ -265,8 +265,34 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     const [manualOverride, setManualOverride] = useState(false)
     const [ocrFields, setOcrFields] = useState<ParsedGrant | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
+    const isOpenRef = useRef(isOpen)
+    useEffect(() => {
+        isOpenRef.current = isOpen
+    }, [isOpen])
 
     if (!isOpen) return null
+
+    function resetForm() {
+        setPlate('')
+        setChassis('')
+        setSelectedMake('')
+        setSelectedModel('')
+        setSelectedVariant('')
+        setSelectedYear('')
+        setMarketVal('')
+        setInsurancePanel('')
+        setIntakeCost('')
+        setManualOverride(false)
+        setOcrFields(null)
+        setOcrBusy(false)
+        setOcrStatus('')
+        setOcrPass(0)
+    }
+
+    function handleClose() {
+        resetForm()
+        onClose()
+    }
 
     const availableModels = selectedMake ? getModelsForMake(selectedMake) : []
     const availableVariants = selectedMake && selectedModel ? getVariantsForModel(selectedMake, selectedModel) : []
@@ -341,6 +367,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         setOcrStatus('loading')
         try {
             const { createWorker } = await import('tesseract.js')
+            if (!isOpenRef.current) return
             const worker = await createWorker('eng')
             const variants = await makeGrantVariants(file)
             let best: { parsed: ParsedGrant; rotation: number } | null = null
@@ -348,6 +375,10 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                 setOcrStatus('reading')
                 setOcrPass(i + 1)
                 const { data } = await worker.recognize(variants[i].blob)
+                if (!isOpenRef.current) {
+                    await worker.terminate()
+                    return
+                }
                 const parsed = parseGrantText(data.text)
                 const score = scoreGrant(parsed)
                 if (!best || score > scoreGrant(best.parsed)) {
@@ -356,6 +387,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                 if (score >= 5) break // this orientation parsed well — no need to try the rest
             }
             await worker.terminate()
+            if (!isOpenRef.current) return
             setOcrStatus('parsing')
             if (!best || scoreGrant(best.parsed) === 0) {
                 showToast('Could not read vehicle details from this photo. Make sure the certificate is in focus and well lit.', 'error')
@@ -415,7 +447,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                     <div>
                         <h3 className="text-xl font-extrabold">New Vehicle Intake</h3>
                     </div>
-                    <button onClick={onClose} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg cursor-pointer ${closeBtnClass}`}>&times;</button>
+                    <button onClick={handleClose} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg cursor-pointer ${closeBtnClass}`}>&times;</button>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
@@ -464,17 +496,13 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                     </div>
 
                     <div className="flex justify-end mb-1">
-                        {manualOverride ? (
-                            <span className={`text-[10px] font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>✓ Manual entry enabled</span>
-                        ) : (
-                            <button
-                                type="button"
-                                onClick={() => setManualOverride(true)}
-                                className={`text-[10px] font-bold underline cursor-pointer ${isDark ? 'text-blue-300 hover:text-blue-200' : 'text-blue-600 hover:text-blue-500'}`}
-                            >
-                                ✏️ Enter data manually
-                            </button>
-                        )}
+                        <button
+                            type="button"
+                            onClick={() => setManualOverride(v => !v)}
+                            className={`text-[10px] font-bold underline cursor-pointer ${isDark ? 'text-blue-300 hover:text-blue-200' : 'text-blue-600 hover:text-blue-500'}`}
+                        >
+                            {manualOverride ? '↩ Back to OCR data' : '✏️ Enter data manually'}
+                        </button>
                     </div>
 
                     {manualOverride ? (
@@ -551,7 +579,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                     </div>
 
                     <div className={`flex justify-end gap-3 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                        <button type="button" onClick={onClose} className={`px-5 py-2.5 rounded-xl text-xs font-bold cursor-pointer ${cancelBtnClass}`}>Cancel</button>
+                        <button type="button" onClick={handleClose} className={`px-5 py-2.5 rounded-xl text-xs font-bold cursor-pointer ${cancelBtnClass}`}>Cancel</button>
                         <button type="submit" className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow-lg shadow-blue-500/20">Save & Intake</button>
                     </div>
                 </form>
