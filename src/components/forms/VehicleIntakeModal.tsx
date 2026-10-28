@@ -42,20 +42,31 @@ function parseGrantText(raw: string): ParsedGrant {
         return ''
     }
 
-    result.plate = findValue(
-        l => l.includes('PENDAFTARAN') && !l.includes('TARIKH'),
-        /([A-Z]{1,3}\s?\d{1,4}[A-Z]?)/
-    )
-    // Chassis/VIN: the value sits after "ENJIN" (when the chassis and engine
-    // numbers share one line) or after the CHASIS label, before the "/" that
-    // separates chassis from engine number. Handles OCR mangling the label
-    // ("CHASTS"), inserting spaces in the VIN, or dropping the "/" separator.
+    // --- Plate: everything after the "PENDAFTARAN" label (may wrap to the
+    // next line). Cut first so OCR noise before the label can't match.
+    const plateLineIdx = lines.findIndex(l => l.includes('PENDAFTARAN') && !l.includes('TARIKH'))
+    if (plateLineIdx !== -1) {
+        let plateVal = lines[plateLineIdx].slice(lines[plateLineIdx].indexOf('PENDAFTARAN') + 'PENDAFTARAN'.length)
+        if (!/[A-Z0-9]/.test(plateVal) && lines[plateLineIdx + 1]) {
+            plateVal = (plateVal + ' ' + lines[plateLineIdx + 1]).trim()
+        }
+        const plateMatch = plateVal.match(/^[^A-Z0-9]*([A-Z]{1,3}\s?\d{1,4}[A-Z]?)/)
+        if (plateMatch) result.plate = plateMatch[1].replace(/\s/g, '')
+    }
+
+    // --- Chassis/VIN: the value sits after "ENJIN" (when the chassis and
+    // engine numbers share one line) or after the CHASIS label, before the
+    // "/" that separates chassis from engine number. Handles OCR mangling
+    // the label ("CHASTS"), inserting spaces in the VIN, or dropping the "/".
     const chassisIdx = lines.findIndex(l => l.includes('CHAS'))
     if (chassisIdx !== -1) {
         const chassisLine = lines[chassisIdx]
         let val = ''
         if (chassisLine.includes('ENJIN')) {
             val = chassisLine.slice(chassisLine.indexOf('ENJIN') + 5)
+            if (!/[A-Z0-9]{8,}/.test(val) && lines[chassisIdx + 1]) {
+                val = (val + ' ' + lines[chassisIdx + 1]).trim()
+            }
         } else {
             const ci = Math.max(chassisLine.lastIndexOf('CHASSIS'), chassisLine.lastIndexOf('CHASIS'))
             if (ci !== -1) {
@@ -69,25 +80,54 @@ function parseGrantText(raw: string): ParsedGrant {
         const chassisMatch = firstPart.match(/[A-Z]{2,5}\d{4,}[A-Z]{1,4}\d{3,6}/) || firstPart.match(/[A-Z0-9]{12,18}/)
         if (chassisMatch) result.chassis = chassisMatch[0]
     }
+    // If the label itself was mangled beyond recognition ("NE ONA IN"), fall
+    // back to scanning every line for a delimited letter-starting token of
+    // 12-18 chars that also contains a digit — VINs look like that, while the
+    // ID number (digits only), dates and short words do not.
+    if (!result.chassis) {
+        for (const line of lines) {
+            const m = line.match(/(?:^|[^A-Z0-9])([A-Z][A-Z0-9]{11,17})(?:$|[^A-Z0-9])/)
+            if (m && /\d/.test(m[1])) {
+                result.chassis = m[1]
+                break
+            }
+        }
+    }
+
     result.year = findValue(
         l => l.includes('TAHUN') || l.includes('DIBUAT'),
         /((?:19|20)\d{2})/
     )
     result.spec = findValue(
-        l => (l.includes('KUUP') || l.includes('KUASA')) && l.includes('ENJIN'),
+        l => (l.includes('KUUP') || l.includes('KUASA') || l.includes('KEUPAYAAN') || l.includes('KEUPAYAN')) && l.includes('ENJIN'),
         /(\d{3,4})/
     )
 
+    // --- Make/Model: cut everything before the model label, keep the value.
+    // Join the next line only when the value looks incomplete (no "/" pair).
     const mmLineIdx = lines.findIndex(l => l.includes('BUATAN') || l.includes('NAMA MODEL') || l.includes('MODEL'))
     if (mmLineIdx !== -1) {
-        let mmText = ''
-        for (let j = 0; j <= 2; j++) mmText += ' ' + (lines[mmLineIdx + j] || '')
+        let mmText = lines[mmLineIdx]
+        const labelEnd = Math.max(mmText.lastIndexOf('NAMA MODEL'), mmText.lastIndexOf('BUATAN'), mmText.lastIndexOf('MODEL'))
+        if (labelEnd !== -1) {
+            mmText = mmText.slice(labelEnd)
+        }
+        const rawVal = mmText.replace(/BUATAN|NAMA MODEL|MODEL/g, ' ')
+        if (!/[A-Z0-9]+\s*\/\s*[A-Z0-9]/.test(rawVal)) {
+            for (let k = 1; k <= 2 && lines[mmLineIdx + k]; k++) {
+                const extra = lines[mmLineIdx + k]
+                mmText = mmText + ' ' + extra
+                if (/[A-Z0-9]+\s*\/\s*[A-Z0-9]/.test(rawVal + ' ' + extra)) break
+            }
+        }
         mmText = mmText
             .replace(/BUATAN/g, ' ')
             .replace(/NAMA MODEL/g, ' ')
             .replace(/MODEL/g, ' ')
             .trim()
-        mmText = mmText.split(/\s+(?:KUUP|KUASA|BAHAN|PEMASANGAN|KELAS|JENIS|TARIKH|SYARAT|STATUS|B\.?D\.?)/)[0].trim()
+            .replace(/^[^A-Z0-9]+/, '')
+            .trim()
+        mmText = mmText.split(/\s+(?:KUUP|KUASA|KEUPAYAAN|KEUPAYAN|BAHAN|PEMASANGAN|KELAS|JENIS|TARIKH|SYARAT|STATUS|B\.?D\.?)/)[0].trim()
         const mmParts = mmText.split('/').map(s => s.trim()).filter(Boolean)
         if (mmParts.length >= 2) {
             result.make = mmParts[0]
@@ -222,6 +262,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     const [ocrBusy, setOcrBusy] = useState(false)
     const [ocrStatus, setOcrStatus] = useState('')
     const [ocrPass, setOcrPass] = useState(0)
+    const [manualOverride, setManualOverride] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     if (!isOpen) return null
@@ -240,6 +281,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     function applyParsed(parsed: ParsedGrant, rotation: number) {
         const notes: string[] = []
         if (rotation !== 0) notes.push(`Rotated ${rotation}°`)
+        if (!manualOverride) notes.push('Make/Model/Year locked — “Enter data manually” to edit')
 
         if (parsed.plate) {
             setPlate(parsed.plate)
@@ -410,17 +452,31 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                         <input type="text" required placeholder="e.g. PMAL123456789" value={chassis} onChange={(e) => setChassis(e.target.value.toUpperCase())} className={`w-full border rounded-xl p-3 text-xs font-medium uppercase ${inputBgClass}`} />
                     </div>
 
+                    <div className="flex justify-end mb-1">
+                        {manualOverride ? (
+                            <span className={`text-[10px] font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>✓ Manual entry enabled</span>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={() => setManualOverride(true)}
+                                className={`text-[10px] font-bold underline cursor-pointer ${isDark ? 'text-blue-300 hover:text-blue-200' : 'text-blue-600 hover:text-blue-500'}`}
+                            >
+                                ✏️ Enter data manually
+                            </button>
+                        )}
+                    </div>
+
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Make *</label>
-                            <select required value={selectedMake} onChange={handleMakeChange} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer ${inputBgClass}`}>
+                            <select required disabled={!manualOverride} value={selectedMake} onChange={handleMakeChange} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${inputBgClass}`}>
                                 <option value="">-- Select Make --</option>
                                 {makes.map(m => <option key={m} value={m}>{m}</option>)}
                             </select>
                         </div>
                         <div>
                             <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Model *</label>
-                            <select required disabled={!selectedMake} value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer disabled:opacity-50 ${inputBgClass}`}>
+                            <select required disabled={!manualOverride || !selectedMake} value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${inputBgClass}`}>
                                 <option value="">-- Select Model --</option>
                                 {availableModels.map(md => <option key={md} value={md}>{md}</option>)}
                             </select>
@@ -430,14 +486,14 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Variant / Spec</label>
-                            <select disabled={!selectedModel} value={selectedVariant} onChange={(e) => setSelectedVariant(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer disabled:opacity-50 ${inputBgClass}`}>
+                            <select disabled={!manualOverride || !selectedModel} value={selectedVariant} onChange={(e) => setSelectedVariant(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${inputBgClass}`}>
                                 <option value="">-- Select Variant --</option>
                                 {availableVariants.map(v => <option key={v} value={v}>{v}</option>)}
                             </select>
                         </div>
                         <div>
                             <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Mfg. Year *</label>
-                            <select required value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer ${inputBgClass}`}>
+                            <select required disabled={!manualOverride} value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${inputBgClass}`}>
                                 <option value="">-- Select Year --</option>
                                 {years.map(y => <option key={y} value={y}>{y}</option>)}
                             </select>
