@@ -10,6 +10,7 @@ import { getPhotoStageRules } from '@/lib/photoStages'
 import Toast from '@/components/ui/Toast'
 import ConfirmModal from '@/components/ui/ConfirmModal'
 import PreviewModal from '@/components/ui/PreviewModal'
+import PhotoThumb from '@/components/ui/PhotoThumb'
 import AccountSettingsModal, { type AccountSettingsPayload } from '@/components/ui/AccountSettingsModal'
 import Card from '@/components/ui/Card'
 import StatusBadge from '@/components/ui/StatusBadge'
@@ -43,7 +44,7 @@ type ConfirmState = {
     confirmVariant?: 'primary' | 'danger' | 'success'
     onConfirm: () => void
 } | null
-type PreviewState = { url: string; title: string } | null
+type PreviewState = { items: { url: string; title: string }[]; index: number } | null
 
 export default function TechnicianModule() {
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
@@ -71,6 +72,24 @@ export default function TechnicianModule() {
     const [settingsUsername, setSettingsUsername] = useState('')
 
     const supabase = createClient()
+
+    function openPhaseGallery(phase: 'photo_before' | 'photo_after', clickedUrl: string) {
+        const items = mediaItems
+            .filter(m => m.media_type === phase)
+            .map(m => ({
+                url: m.file_url,
+                title: `${selectedVehicle?.plate_number ?? ''} - ${PHOTO_CATEGORIES.find(c => c.key === m.category)?.label ?? m.category} (${phase === 'photo_before' ? 'Before' : 'After'})`,
+            }))
+        setPreviewMedia({ items, index: Math.max(0, items.findIndex(it => it.url === clickedUrl)) })
+    }
+
+    function openAdditionalGallery(clickedUrl: string) {
+        const items = additionalPhotos.map(item => ({
+            url: item.file_url,
+            title: `${selectedVehicle?.plate_number ?? ''} - ${item.category.replace(/^extra_/, '').replace(/_[0-9a-f]{8}$/, '').replace(/_/g, ' ')} (Additional)`,
+        }))
+        setPreviewMedia({ items, index: Math.max(0, items.findIndex(it => it.url === clickedUrl)) })
+    }
 
     function showToast(message: string, type: 'success' | 'error') {
         setToast({ message, type })
@@ -443,7 +462,7 @@ export default function TechnicianModule() {
                     isDark={isDark}
                 />
             )}
-            <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} isDark={isDark} />
+            <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} onNavigate={(index) => setPreviewMedia(prev => (prev ? { ...prev, index } : prev))} isDark={isDark} />
 
             {/* Settings Modal */}
             {showSettingsModal && (
@@ -595,8 +614,9 @@ export default function TechnicianModule() {
                                                                 isDark={isDark}
                                                                 phase="before"
                                                                 isCaptured={!!before}
+                                                                photoUrl={before?.file_url}
                                                                 readonly={beforeMode === 'readonly'}
-                                                                onView={() => setPreviewMedia({ url: before!.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })}
+                                                                onView={() => openPhaseGallery('photo_before', before!.file_url)}
                                                                 onRemove={() => handleRemovePhoto(before!)}
                                                                 onFileChange={(e) => handlePhotoSelect(e, cat.key, 'photo_before')}
                                                                 inputId={`upload-before-${cat.key}`}
@@ -607,8 +627,9 @@ export default function TechnicianModule() {
                                                                 isDark={isDark}
                                                                 phase="after"
                                                                 isCaptured={!!after}
+                                                                photoUrl={after?.file_url}
                                                                 readonly={afterMode === 'readonly'}
-                                                                onView={() => setPreviewMedia({ url: after!.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })}
+                                                                onView={() => openPhaseGallery('photo_after', after!.file_url)}
                                                                 onRemove={() => handleRemovePhoto(after!)}
                                                                 onFileChange={(e) => handlePhotoSelect(e, cat.key, 'photo_after')}
                                                                 inputId={`upload-after-${cat.key}`}
@@ -632,18 +653,31 @@ export default function TechnicianModule() {
                                                 <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload close-up damage details, part codes, or extra inspection angles.</p>
                                             </div>
                                             {additionalMode === 'edit' && (
-                                                <div>
+                                                <div className="flex gap-2">
                                                     <label
                                                         htmlFor="tech-input-additional"
                                                         className="text-xs bg-purple-600 hover:bg-purple-500 text-white px-3.5 py-1.5 rounded-xl font-bold cursor-pointer shadow inline-block transition-colors"
                                                     >
-                                                        {uploadingKey ? 'Uploading…' : '+ Add Photo'}
+                                                        {uploadingKey ? 'Uploading…' : '📷 Take Photo'}
                                                     </label>
                                                     <input
                                                         id="tech-input-additional"
                                                         type="file"
                                                         accept="image/*"
                                                         capture="environment"
+                                                        className="hidden"
+                                                        onChange={handleAdditionalPhotoSelect}
+                                                    />
+                                                    <label
+                                                        htmlFor="tech-input-additional-file"
+                                                        className={`text-xs px-3.5 py-1.5 rounded-xl font-bold cursor-pointer shadow inline-block transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
+                                                    >
+                                                        {uploadingKey ? 'Uploading…' : '📁 Upload'}
+                                                    </label>
+                                                    <input
+                                                        id="tech-input-additional-file"
+                                                        type="file"
+                                                        accept="image/*"
                                                         className="hidden"
                                                         onChange={handleAdditionalPhotoSelect}
                                                     />
@@ -660,29 +694,26 @@ export default function TechnicianModule() {
                                                 {additionalPhotos.map((item) => {
                                                     const displayTitle = item.category.replace(/^extra_/, '').replace(/_[0-9a-f]{8}$/, '').replace(/_/g, ' ')
                                                     return (
-                                                        <div key={item.id} className={`border rounded-xl p-3.5 flex items-center justify-between ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-white border-slate-200'}`}>
-                                                            <div>
+                                                        <div key={item.id} className={`border rounded-xl p-3.5 flex flex-col justify-between gap-2.5 ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-white border-slate-200'}`}>
+                                                            <div className="flex items-center justify-between gap-2">
                                                                 <p className={`text-xs font-bold capitalize ${isDark ? 'text-purple-300' : 'text-purple-700'}`}>{displayTitle}</p>
-                                                                <p className={`text-[10px] font-semibold mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>✓ Extra Evidence</p>
+                                                                <p className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>✓ Extra Evidence</p>
                                                             </div>
-                                                            <div className="flex gap-1">
+                                                            <PhotoThumb
+                                                                url={item.file_url}
+                                                                alt={`${selectedVehicle?.plate_number ?? ''} - ${displayTitle}`}
+                                                                onClick={() => openAdditionalGallery(item.file_url)}
+                                                                className="h-24"
+                                                            />
+                                                            {additionalMode === 'edit' && (
                                                                 <button
                                                                     type="button"
-                                                                    onClick={() => setPreviewMedia({ url: item.file_url, title: `${selectedVehicle?.plate_number} - ${displayTitle}` })}
-                                                                    className={`text-[11px] px-2.5 py-1.5 rounded-lg font-bold border cursor-pointer ${isDark ? 'bg-slate-800 text-purple-300 border-slate-700' : 'bg-slate-100 text-purple-700 border-slate-200'}`}
+                                                                    onClick={() => handleRemovePhoto(item)}
+                                                                    className={`text-[11px] px-2.5 py-1.5 rounded-lg font-bold border cursor-pointer ${isDark ? 'bg-rose-950 text-rose-400 border-rose-900' : 'bg-rose-50 text-rose-600 border-rose-200'}`}
                                                                 >
-                                                                    View
+                                                                    Remove
                                                                 </button>
-                                                                {additionalMode === 'edit' && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleRemovePhoto(item)}
-                                                                        className={`text-[11px] px-2.5 py-1.5 rounded-lg font-bold border cursor-pointer ${isDark ? 'bg-rose-950 text-rose-400 border-rose-900' : 'bg-rose-50 text-rose-600 border-rose-200'}`}
-                                                                    >
-                                                                        Remove
-                                                                    </button>
-                                                                )}
-                                                            </div>
+                                                            )}
                                                         </div>
                                                     )
                                                 })}

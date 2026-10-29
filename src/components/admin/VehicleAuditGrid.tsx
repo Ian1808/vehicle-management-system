@@ -1,6 +1,7 @@
 "use client"
 
 import { PHOTO_CATEGORIES } from '@/lib/photoCategories'
+import PhotoThumb from '@/components/ui/PhotoThumb'
 
 type MediaItem = {
     id: string
@@ -24,9 +25,6 @@ export default function VehicleAuditGrid({ isDark, title, mediaItems, phase, veh
     const capturedTextColor = phase === 'before' ? 'text-emerald-400' : 'text-blue-400'
     const missingTextColor = phase === 'before' ? 'text-rose-400' : 'text-slate-500'
     const missingLabel = phase === 'before' ? 'Missing' : 'Pending / Not Yet Captured'
-    const buttonColor = phase === 'before'
-        ? (isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-600 border-slate-200')
-        : (isDark ? 'bg-slate-800 hover:bg-slate-700 text-blue-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-blue-600 border-slate-200')
 
     return (
         <div className={`rounded-3xl border p-6 sm:p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
@@ -45,13 +43,12 @@ export default function VehicleAuditGrid({ isDark, title, mediaItems, phase, veh
                                 </p>
                             </div>
                             {uploaded && (
-                                <button
-                                    type="button"
+                                <PhotoThumb
+                                    url={uploaded.file_url}
+                                    alt={`${vehiclePlate} - ${cat.label} (${phase === 'before' ? 'Before' : 'After'})`}
                                     onClick={() => onView(uploaded.file_url, `${vehiclePlate} - ${cat.label} (${phase === 'before' ? 'Before' : 'After'})`)}
-                                    className={`w-full text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${buttonColor}`}
-                                >
-                                    View Photo
-                                </button>
+                                    className="h-24"
+                                />
                             )}
                         </div>
                     )

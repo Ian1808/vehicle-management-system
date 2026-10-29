@@ -8,7 +8,7 @@ type ToastProps = {
 
 export default function Toast({ message, type, isDark = true }: ToastProps) {
     return (
-        <div className="fixed top-6 right-6 z-50 animate-bounce">
+        <div className="fixed top-6 right-6 z-[100] animate-bounce">
             <div className={`px-5 py-3 rounded-2xl shadow-2xl text-xs font-bold flex items-center gap-3 border ${type === 'success'
                     ? isDark
                         ? 'bg-emerald-950 text-emerald-200 border-emerald-700/80 shadow-emerald-950/50'

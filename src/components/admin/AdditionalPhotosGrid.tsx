@@ -1,5 +1,7 @@
 "use client"
 
+import PhotoThumb from '@/components/ui/PhotoThumb'
+
 type MediaItem = {
     id: string
     category: string
@@ -24,9 +26,6 @@ export default function AdditionalPhotosGrid({ isDark, mediaItems, vehiclePlate,
     const additional = mediaItems.filter(m => m.media_type === 'photo_additional')
     const isBlue = accent === 'blue'
     const capturedColor = isBlue ? (isDark ? 'text-blue-300' : 'text-blue-600') : (isDark ? 'text-purple-300' : 'text-purple-600')
-    const buttonColor = isBlue
-        ? (isDark ? 'bg-slate-800 hover:bg-slate-700 text-blue-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-blue-600 border-slate-200')
-        : (isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-600 border-slate-200')
 
     return (
         <div className={`rounded-3xl border p-6 sm:p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
@@ -40,18 +39,17 @@ export default function AdditionalPhotosGrid({ isDark, mediaItems, vehiclePlate,
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     {additional.map((item) => (
-                        <div key={item.id} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                        <div key={item.id} className={`border rounded-2xl p-4 flex flex-col justify-between gap-3 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                             <div>
                                 <p className="text-xs font-extrabold uppercase tracking-wider mb-1">{additionalLabel(item.category)}</p>
-                                <p className={`text-xs font-semibold mb-4 ${capturedColor}`}>✓ Captured</p>
+                                <p className={`text-xs font-semibold ${capturedColor}`}>✓ Captured</p>
                             </div>
-                            <button
-                                type="button"
+                            <PhotoThumb
+                                url={item.file_url}
+                                alt={`${vehiclePlate} - ${additionalLabel(item.category)} (Additional)`}
                                 onClick={() => onView(item.file_url, `${vehiclePlate} - ${additionalLabel(item.category)} (Additional)`)}
-                                className={`w-full text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${buttonColor}`}
-                            >
-                                View Photo
-                            </button>
+                                className="h-24"
+                            />
                         </div>
                     ))}
                 </div>

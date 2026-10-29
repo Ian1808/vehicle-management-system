@@ -11,6 +11,7 @@ import { getPhotoStageRules } from '@/lib/photoStages'
 import VehicleIntakeModal, { type OcrScanPayload } from '@/components/forms/VehicleIntakeModal'
 import ConfirmModal from '@/components/ui/ConfirmModal'
 import PreviewModal from '@/components/ui/PreviewModal'
+import PhotoThumb from '@/components/ui/PhotoThumb'
 import Toast from '@/components/ui/Toast'
 import AccountSettingsModal, { type AccountSettingsPayload } from '@/components/ui/AccountSettingsModal'
 import Card from '@/components/ui/Card'
@@ -48,7 +49,7 @@ type ConfirmState = {
   confirmVariant?: 'primary' | 'danger' | 'success'
   onConfirm: () => void
 } | null
-type PreviewState = { url: string; title: string } | null
+type PreviewState = { items: { url: string; title: string }[]; index: number } | null
 
 const DOCUMENT_CATEGORIES = ['grant', 'jpj', 'insurance', 'ber'] as const
 
@@ -158,6 +159,22 @@ export default function FrontDeskModule() {
     ocrScan?: OcrScanPayload | null
   }) {
     try {
+      // Duplicate plate / chassis prevention (active vehicles only).
+      const plate = data.plate_number.trim()
+      const chassis = data.chassis_number.trim()
+      const [plateRes, chassisRes] = await Promise.all([
+        supabase.from('vehicles').select('id').eq('is_deleted', false).eq('plate_number', plate).limit(1),
+        chassis ? supabase.from('vehicles').select('id').eq('is_deleted', false).eq('chassis_number', chassis).limit(1) : Promise.resolve({ data: null, error: null }),
+      ])
+      if (plateRes.data && plateRes.data.length > 0) {
+        showToast(`A vehicle with plate number "${data.plate_number}" is already registered.`, 'error')
+        return
+      }
+      if (chassisRes.data && chassisRes.data.length > 0) {
+        showToast(`A vehicle with chassis number "${data.chassis_number}" is already registered.`, 'error')
+        return
+      }
+
       const newId = await insertVehicle({ ...data, created_by: currentUserId })
       if (!newId) throw new Error('Vehicle record was created but its ID could not be resolved.')
 
@@ -207,7 +224,8 @@ export default function FrontDeskModule() {
       const list = await fetchActiveVehicles()
       setVehicles(list)
     } catch (err: any) {
-      showToast(err.message || 'Failed to save vehicle', 'error')
+      const msg = err?.message || 'Failed to save vehicle'
+      showToast(msg.includes('duplicate key value violates unique constraint') ? 'A vehicle with this plate or chassis number is already registered.' : msg, 'error')
     }
   }
 
@@ -414,6 +432,24 @@ export default function FrontDeskModule() {
     }
   }
 
+  function openPhaseGallery(phase: 'photo_before' | 'photo_after', clickedUrl: string) {
+    const items = mediaItems
+      .filter(m => m.media_type === phase)
+      .map(m => ({
+        url: m.file_url,
+        title: `${selectedVehicle?.plate_number ?? ''} - ${PHOTO_CATEGORIES.find(c => c.key === m.category)?.label ?? m.category} (${phase === 'photo_before' ? 'Before' : 'After'})`,
+      }))
+    setPreviewMedia({ items, index: Math.max(0, items.findIndex(it => it.url === clickedUrl)) })
+  }
+
+  function openAdditionalGallery(clickedUrl: string) {
+    const items = additionalPhotos.map(item => ({
+      url: item.file_url,
+      title: `${selectedVehicle?.plate_number ?? ''} - ${additionalLabel(item.category)} (Additional)`,
+    }))
+    setPreviewMedia({ items, index: Math.max(0, items.findIndex(it => it.url === clickedUrl)) })
+  }
+
   const innerCard = isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'
 
   return (
@@ -430,7 +466,7 @@ export default function FrontDeskModule() {
           isDark={isDark}
         />
       )}
-      <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} isDark={isDark} />
+      <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} onNavigate={(index) => setPreviewMedia(prev => (prev ? { ...prev, index } : prev))} isDark={isDark} />
 
       {/* Settings Modal */}
       {showSettingsModal && (
@@ -536,7 +572,7 @@ export default function FrontDeskModule() {
                         </div>
                         {doc ? (
                           <div className="flex gap-2">
-                            <button onClick={() => setPreviewMedia({ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${documentLabel(cat)}` })} className="w-1/2 bg-blue-950 text-blue-300 hover:bg-blue-900 py-2.5 rounded-xl text-xs font-bold border border-blue-800 cursor-pointer">View</button>
+                            <button onClick={() => setPreviewMedia({ items: [{ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${documentLabel(cat)}` }], index: 0 })} className="w-1/2 bg-blue-950 text-blue-300 hover:bg-blue-900 py-2.5 rounded-xl text-xs font-bold border border-blue-800 cursor-pointer">View</button>
                             <button onClick={() => requestDeleteDocument(cat)} className="w-1/2 bg-rose-950 text-rose-300 hover:bg-rose-900 py-2.5 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer">Remove</button>
                           </div>
                         ) : (
@@ -569,14 +605,14 @@ export default function FrontDeskModule() {
                               <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
                                 <p className="text-[10px] font-bold uppercase text-amber-400 mb-1">Before Repair</p>
                                 <p className={`text-[11px] mb-3 ${before ? 'text-emerald-400' : 'text-slate-500'}`}>{before ? '✓ Captured' : 'Pending'}</p>
-                                {before && <button onClick={() => setPreviewMedia({ url: before.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (Before)` })} className={`w-full py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-slate-900 text-emerald-400 border-slate-700' : 'bg-white text-emerald-600 border-slate-200'}`}>View</button>}
+                                {before && <PhotoThumb url={before.file_url} alt={`${selectedVehicle.plate_number} - ${cat.label} (Before)`} onClick={() => openPhaseGallery('photo_before', before.file_url)} className="h-24" />}
                               </div>
                             )}
                             {showAfter && (
                               <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
                                 <p className="text-[10px] font-bold uppercase text-blue-400 mb-1">After Repair</p>
                                 <p className={`text-[11px] mb-3 ${after ? 'text-blue-400' : 'text-slate-500'}`}>{after ? '✓ Captured' : 'Pending'}</p>
-                                {after && <button onClick={() => setPreviewMedia({ url: after.file_url, title: `${selectedVehicle.plate_number} - ${cat.label} (After)` })} className={`w-full py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-slate-900 text-blue-400 border-slate-700' : 'bg-white text-blue-600 border-slate-200'}`}>View</button>}
+                                {after && <PhotoThumb url={after.file_url} alt={`${selectedVehicle.plate_number} - ${cat.label} (After)`} onClick={() => openPhaseGallery('photo_after', after.file_url)} className="h-24" />}
                               </div>
                             )}
                           </div>
@@ -601,7 +637,7 @@ export default function FrontDeskModule() {
                             <p className={`text-xs font-extrabold uppercase mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{additionalLabel(item.category)}</p>
                             <p className="text-[11px] font-semibold text-purple-400 mb-3">✓ Captured</p>
                           </div>
-                          <button onClick={() => setPreviewMedia({ url: item.file_url, title: `${selectedVehicle.plate_number} - ${additionalLabel(item.category)} (Additional)` })} className={`w-full py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${isDark ? 'bg-slate-900 text-purple-300 border-slate-700' : 'bg-white text-purple-600 border-slate-200'}`}>View</button>
+                          <PhotoThumb url={item.file_url} alt={`${selectedVehicle.plate_number} - ${additionalLabel(item.category)} (Additional)`} onClick={() => openAdditionalGallery(item.file_url)} className="h-24" />
                         </div>
                       ))}
                     </div>

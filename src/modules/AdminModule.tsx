@@ -19,6 +19,7 @@ import VehicleAuditGrid from '@/components/admin/VehicleAuditGrid'
 import AdditionalPhotosGrid from '@/components/admin/AdditionalPhotosGrid'
 import VehicleEditModal, { type VehicleEditPayload } from '@/components/admin/VehicleEditModal'
 import { getPhotoStageRules } from '@/lib/photoStages'
+import { PHOTO_CATEGORIES } from '@/lib/photoCategories'
 
 type Vehicle = {
     id: string
@@ -67,8 +68,8 @@ type ConfirmModal = {
 }
 
 type PreviewMedia = {
-    url: string
-    title: string
+    items: { url: string; title: string }[]
+    index: number
 }
 
 type ScanLogEntry = {
@@ -587,6 +588,22 @@ export default function AdminModule() {
         if (!editingVehicle) return false
 
         try {
+            // Duplicate plate / chassis prevention (active vehicles only, excluding this one).
+            const plate = payload.plate_number.trim()
+            const chassis = payload.chassis_number.trim()
+            const [plateRes, chassisRes] = await Promise.all([
+                supabase.from('vehicles').select('id').eq('is_deleted', false).neq('id', editingVehicle.id).eq('plate_number', plate).limit(1),
+                chassis ? supabase.from('vehicles').select('id').eq('is_deleted', false).neq('id', editingVehicle.id).eq('chassis_number', chassis).limit(1) : Promise.resolve({ data: null, error: null }),
+            ])
+            if (plateRes.data && plateRes.data.length > 0) {
+                showToast(`Another vehicle already uses plate number "${payload.plate_number}".`, 'error')
+                return false
+            }
+            if (chassisRes.data && chassisRes.data.length > 0) {
+                showToast(`Another vehicle already uses chassis number "${payload.chassis_number}".`, 'error')
+                return false
+            }
+
             const { error } = await supabase
                 .from('vehicles')
                 .update({
@@ -609,7 +626,8 @@ export default function AdminModule() {
             await fetchAllData()
             return true
         } catch (err) {
-            showToast(err instanceof Error ? err.message : 'Failed to update vehicle', 'error')
+            const msg = err instanceof Error ? err.message : 'Failed to update vehicle'
+            showToast(msg.includes('duplicate key value violates unique constraint') ? 'Another vehicle already uses this plate or chassis number.' : msg, 'error')
             return false
         }
     }
@@ -680,6 +698,26 @@ export default function AdminModule() {
         }
     }
 
+    function openPhaseGallery(phase: 'photo_before' | 'photo_after', clickedUrl: string) {
+        const items = mediaItems
+            .filter(m => m.media_type === phase)
+            .map(m => ({
+                url: m.file_url,
+                title: `${selectedVehicle?.plate_number ?? ''} - ${PHOTO_CATEGORIES.find(c => c.key === m.category)?.label ?? m.category} (${phase === 'photo_before' ? 'Before' : 'After'})`,
+            }))
+        setPreviewMedia({ items, index: Math.max(0, items.findIndex(it => it.url === clickedUrl)) })
+    }
+
+    function openAdditionalGallery(clickedUrl: string) {
+        const items = mediaItems
+            .filter(m => m.media_type === 'photo_additional')
+            .map(m => ({
+                url: m.file_url,
+                title: `${selectedVehicle?.plate_number ?? ''} - ${m.category.replace(/^extra_/, '').replace(/_[0-9a-f]{8}$/i, '').replace(/_/g, ' ')} (Additional)`,
+            }))
+        setPreviewMedia({ items, index: Math.max(0, items.findIndex(it => it.url === clickedUrl)) })
+    }
+
     function requestLogout() {
         setConfirmModal({
             title: 'Confirm Sign Out',
@@ -742,7 +780,7 @@ export default function AdminModule() {
                 />
             )}
 
-            <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} isDark={isDark} />
+            <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} onNavigate={(index) => setPreviewMedia(prev => (prev ? { ...prev, index } : prev))} isDark={isDark} />
 
             {/* Add Staff User Modal */}
             {showUserModal && (
@@ -1002,7 +1040,7 @@ export default function AdminModule() {
                                                 {doc && (
                                                     <button
                                                         type="button"
-                                                        onClick={() => setPreviewMedia({ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${adminDocumentLabel(cat)}` })}
+                                                        onClick={() => setPreviewMedia({ items: [{ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${adminDocumentLabel(cat)}` }], index: 0 })}
                                                         className={`w-full text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-600 border-slate-200'}`}
                                                     >
                                                         View Document
@@ -1021,7 +1059,7 @@ export default function AdminModule() {
                                     mediaItems={mediaItems}
                                     phase="before"
                                     vehiclePlate={selectedVehicle.plate_number}
-                                    onView={(url, title) => setPreviewMedia({ url, title })}
+                                    onView={(url) => openPhaseGallery('photo_before', url)}
                                 />
                             )}
 
@@ -1032,7 +1070,7 @@ export default function AdminModule() {
                                     mediaItems={mediaItems}
                                     phase="after"
                                     vehiclePlate={selectedVehicle.plate_number}
-                                    onView={(url, title) => setPreviewMedia({ url, title })}
+                                    onView={(url) => openPhaseGallery('photo_after', url)}
                                 />
                             )}
 
@@ -1041,7 +1079,7 @@ export default function AdminModule() {
                                     isDark={isDark}
                                     mediaItems={mediaItems}
                                     vehiclePlate={selectedVehicle.plate_number}
-                                    onView={(url, title) => setPreviewMedia({ url, title })}
+                                    onView={(url) => openAdditionalGallery(url)}
                                 />
                             )}
                         </div>

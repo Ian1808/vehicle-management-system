@@ -327,6 +327,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     const [grantFile, setGrantFile] = useState<File | null>(null)
     const [ocrScan, setOcrScan] = useState<OcrScanPayload | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
+    const cameraInputRef = useRef<HTMLInputElement>(null)
     const isOpenRef = useRef(isOpen)
     useEffect(() => {
         isOpenRef.current = isOpen
@@ -574,14 +575,32 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                             className="hidden"
                             onChange={handleGrantFile}
                         />
-                        <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={ocrBusy}
-                            className="w-full py-3 rounded-xl text-xs font-extrabold transition-all shadow-md cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed bg-blue-600 hover:bg-blue-500 text-white"
-                        >
-                            {ocrBusy ? '⏳ Scanning grant photo…' : '📷 Scan Grant / VOC Photo'}
-                        </button>
+                        <input
+                            ref={cameraInputRef}
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            className="hidden"
+                            onChange={handleGrantFile}
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                onClick={() => cameraInputRef.current?.click()}
+                                disabled={ocrBusy}
+                                className="py-3 rounded-xl text-xs font-extrabold transition-all shadow-md cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed bg-blue-600 hover:bg-blue-500 text-white"
+                            >
+                                📷 Take Photo
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={ocrBusy}
+                                className={`py-3 rounded-xl text-xs font-extrabold transition-all shadow-md cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
+                            >
+                                📁 Upload Photo
+                            </button>
+                        </div>
                         {ocrBusy && (
                             <p className={`text-[10px] font-bold mt-2 ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>
                                 {ocrStatus === 'loading' ? '⏳ Preparing OCR engine (first scan downloads ~15 MB, please wait)…' : ocrStatus === 'reading' ? (ocrPass > 1 ? `📖 Reading text from photo (pass ${ocrPass}/4 — trying orientations)…` : '📖 Reading text from photo…') : '✨ Filling in fields…'}
