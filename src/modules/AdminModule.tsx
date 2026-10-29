@@ -644,7 +644,17 @@ export default function AdminModule() {
             }
 
             await supabase.from('vehicle_media').delete().eq('vehicle_id', vehicleId)
-            await supabase.from('vehicles').delete().eq('id', vehicleId)
+            const { data: deletedRows, error: deleteError } = await supabase
+                .from('vehicles')
+                .delete()
+                .eq('id', vehicleId)
+                .select('id')
+            if (deleteError) throw deleteError
+            if (!deletedRows || deletedRows.length === 0) {
+                showToast('No vehicle row was removed — the database delete policy (RLS) is blocking it. Run the SQL fix in Supabase (see Admin note).', 'error')
+                await fetchDeletedVehicles()
+                return
+            }
             showToast('Vehicle permanently deleted.', 'success')
             await fetchDeletedVehicles()
         } catch (err) {
