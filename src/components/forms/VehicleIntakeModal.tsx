@@ -163,11 +163,11 @@ async function refineByRegions(
     return { parsed: merged, refined }
 }
 
-// Downsizes the photo to a compact JPEG for the cloud path. Google Vision
-// rotates the document itself, so no 4-orientation variants are needed here.
-// Quality stays high (0.95) — aggressive JPEG compression made Vision misread
-// "I-VTEC" as "1-VTEC" on the pink certificate background.
-async function compressForCloud(file: File): Promise<string> {
+// Downsizes the photo to a compact JPEG for the cloud (Gemini) path. Gemini
+// reads the document in any orientation itself, so no 4-orientation variants
+// are needed here. Quality stays high (0.95) — aggressive JPEG compression
+// previously made OCR engines misread "I-VTEC" as "1-VTEC".
+async function compressForUpload(file: File): Promise<string> {
     const bitmap = await createImageBitmap(file)
     const MAX = 2000
     const scale = Math.min(1, MAX / Math.max(bitmap.width, bitmap.height))
@@ -186,33 +186,41 @@ async function compressForCloud(file: File): Promise<string> {
     return dataUrl.slice(dataUrl.indexOf(',') + 1)
 }
 
-// Calls the server route that proxies to Google Cloud Vision. Returns
-// { parsed, classification } on a successful scan, { unavailable: true } when
-// the route reports no key / an API error (so the UI can hint at setup), or
-// null when the scan itself failed (no text / timeout) and the offline
-// fallback should run. A 25s timeout guarantees the scanner can never spin
-// forever.
-async function tryCloudOcr(file: File): Promise<{ parsed: ParsedGrant; classification: GrantClassification } | { unavailable: true } | null> {
+type GeminiResult = {
+    fields: ParsedGrant
+    confidence: Record<string, number>
+    text: string
+    model: string
+}
+
+// Calls the server route that proxies to Gemini (gemini-3.8-flash, thinking
+// low). Returns { fields, confidence, text, model } on a successful scan,
+// { unavailable: true } when the route reports no key / the API is disabled
+// (so the UI can hint at setup), or null when the scan itself failed (no
+// result / timeout) and the offline fallback should run. A 25s timeout
+// guarantees the scanner can never spin forever.
+async function tryGeminiOcr(file: File): Promise<GeminiResult | { unavailable: true } | null> {
     try {
-        const imageBase64 = await compressForCloud(file)
+        const imageBase64 = await compressForUpload(file)
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), 25000)
         try {
             const res = await fetch('/api/ocr/grant', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageBase64 }),
+                body: JSON.stringify({ imageBase64, mimeType: 'image/jpeg' }),
                 signal: controller.signal,
             })
-            if (res.status === 503 || res.status === 502) return { unavailable: true }
+            if (res.status === 503) return { unavailable: true }
             if (!res.ok) return null
             const data = await res.json()
-            if (!data?.text) return null
-            const classification = classifyGrantLines(
-                data.text.replace(/\r/g, '').split('\n').map((l: string) => ({ text: l }))
-            )
-            if (scoreGrant(classification.parsed) === 0) return null
-            return { parsed: classification.parsed, classification }
+            if (!data?.fields) return null
+            return {
+                fields: data.fields as ParsedGrant,
+                confidence: (data.confidence && typeof data.confidence === 'object' ? data.confidence : {}) as Record<string, number>,
+                text: typeof data.text === 'string' ? data.text : '',
+                model: typeof data.model === 'string' ? data.model : 'gemini-3.8-flash',
+            }
         } finally {
             clearTimeout(timer)
         }
@@ -221,10 +229,59 @@ async function tryCloudOcr(file: File): Promise<{ parsed: ParsedGrant; classific
     }
 }
 
-// Cloud OCR (Google Vision) is opt-in. Off by default so scan results come
-// purely from the offline Tesseract engine; set NEXT_PUBLIC_ENABLE_CLOUD_OCR
-// to "true" in .env.local (and restart the dev server) to turn it back on.
-const CLOUD_OCR_ENABLED = process.env.NEXT_PUBLIC_ENABLE_CLOUD_OCR === 'true'
+// --- score rating: lets you monitor whether the cloud model is sufficient ---
+const SCORE_HISTORY_KEY = 'vehicleOcrScoreHistory'
+type OcrScoreEntry = { ts: number; model: string; score: number; filled: number; total: number; plate: string }
+
+function computeOcrScore(fields: ParsedGrant, confidence: Record<string, number>): { overall: number; filled: number } {
+    const keys = Object.keys(FIELD_LABELS)
+    let sum = 0
+    let filled = 0
+    for (const k of keys) {
+        if (fields[k as keyof ParsedGrant]) filled++
+        sum += confidence[k] || 0
+    }
+    return { overall: Math.round(sum / Math.max(1, keys.length)), filled }
+}
+
+function recordOcrScore(entry: OcrScoreEntry) {
+    console.log('[OCR] scan record', entry)
+    try {
+        const list: OcrScoreEntry[] = JSON.parse(localStorage.getItem(SCORE_HISTORY_KEY) || '[]')
+        list.push(entry)
+        localStorage.setItem(SCORE_HISTORY_KEY, JSON.stringify(list.slice(-50)))
+    } catch {
+        /* storage unavailable — console log only */
+    }
+}
+
+function readOcrHistory(): OcrScoreEntry[] {
+    try {
+        return JSON.parse(localStorage.getItem(SCORE_HISTORY_KEY) || '[]')
+    } catch {
+        return []
+    }
+}
+
+// Builds a classification for the inspect panel from Gemini's structured
+// output: the parsed fields come straight from the model, while the line tags
+// come from its plain transcription of the certificate.
+function geminiToClassification(fields: ParsedGrant, text: string): GrantClassification {
+    const base = classifyGrantLines(
+        text.replace(/\r/g, '').split('\n').map((l: string) => ({ text: l }))
+    )
+    const sources: Record<string, string> = { plate: '', chassis: '', make: '', model: '', variant: '', spec: '', year: '' }
+    for (const entry of Object.entries(fields) as Array<[keyof ParsedGrant, string]>) {
+        const [key, value] = entry
+        if (!value) continue
+        const rec = base.lineRecords.find(r => r.valueText === value)
+        if (rec) {
+            if (!rec.field) rec.field = key
+            sources[key] = rec.text
+        }
+    }
+    return { parsed: fields, lineRecords: base.lineRecords, sources }
+}
 
 type Props = {
     isOpen: boolean
@@ -269,6 +326,9 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     }, [isOpen])
 
     if (!isOpen) return null
+    // Read the persisted scan-score history at render time (SSR-safe: the
+    // reader returns [] when localStorage is unavailable).
+    const scanHistory = showInspect ? readOcrHistory() : []
 
     function resetForm() {
         setPlate('')
@@ -365,23 +425,25 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         e.target.value = ''
         if (!file) return
         setOcrBusy(true)
-        let cloudUnavailable = false
+        let geminiUnavailable = false
         try {
-            // 1) Cloud OCR first (Google Vision) — only when explicitly enabled.
-            if (CLOUD_OCR_ENABLED) {
-                setOcrStatus('reading')
-                const cloudResult = await tryCloudOcr(file)
-                if (cloudResult && 'parsed' in cloudResult) {
-                    if (!isOpenRef.current) return
-                    setOcrStatus('parsing')
-                    setOcrInspect(buildGrantInspect(cloudResult.classification, 'cloud', 0))
-                    applyParsed(cloudResult.parsed, 0)
-                    return
-                }
-                cloudUnavailable = cloudResult !== null && 'unavailable' in cloudResult
+            // 1) Gemini (gemini-3.8-flash, thinking low) — reads the certificate
+            // in any orientation and returns structured fields + a score.
+            setOcrStatus('reading')
+            const gemini = await tryGeminiOcr(file)
+            if (gemini && 'fields' in gemini) {
+                if (!isOpenRef.current) return
+                setOcrStatus('parsing')
+                const { overall, filled } = computeOcrScore(gemini.fields, gemini.confidence)
+                recordOcrScore({ ts: Date.now(), model: gemini.model, score: overall, filled, total: 7, plate: gemini.fields.plate || '' })
+                const classification = geminiToClassification(gemini.fields, gemini.text)
+                setOcrInspect(buildGrantInspect(classification, 'cloud', 0, [], { model: gemini.model, score: overall, confidence: gemini.confidence }))
+                applyParsed(gemini.fields, 0)
+                return
             }
+            geminiUnavailable = gemini !== null && 'unavailable' in gemini
 
-            // 2) Offline Tesseract (tries 0°/90°/180°/270°; keeps the best).
+            // 2) Offline Tesseract fallback (tries 0°/90°/180°/270°; keeps the best).
             setOcrStatus('loading')
             const { createWorker } = await import('tesseract.js')
             if (!isOpenRef.current) return
@@ -416,8 +478,8 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
             if (!best || scoreGrant(best.parsed) === 0) {
                 if (best) setOcrInspect(buildGrantInspect(best.classification, 'offline', best.rotation))
                 await worker.terminate()
-                if (cloudUnavailable) {
-                    showToast('Google Vision is unavailable (check the API key in .env.local) and the offline scan could not read this photo either. Please fill in the details manually.', 'error')
+                if (geminiUnavailable) {
+                    showToast('Gemini is unavailable (check GEMINI_API_KEY in .env.local — the Generative Language API must be enabled for your Google Cloud project) and the offline scan could not read this photo either. Please fill in the details manually.', 'error')
                 } else {
                     showToast('Could not read vehicle details from this photo. Make sure the certificate is in focus and well lit.', 'error')
                 }
@@ -522,7 +584,12 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                                 className={`w-full flex items-center justify-between text-[11px] font-extrabold cursor-pointer ${isDark ? 'text-slate-300' : 'text-slate-700'}`}
                             >
                                 <span>
-                                    🔍 OCR details — {ocrInspect.engine === 'cloud' ? 'Google Vision' : 'offline engine'}
+                                    🔍 OCR details — {ocrInspect.engine === 'cloud' ? (ocrInspect.model || 'Gemini') : 'offline engine'}
+                                    {typeof ocrInspect.score === 'number' && (
+                                        <span className={ocrInspect.score >= 80 ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : ocrInspect.score >= 50 ? (isDark ? 'text-amber-400' : 'text-amber-600') : (isDark ? 'text-rose-400' : 'text-rose-600')}>
+                                            {' '}· score {ocrInspect.score}/100
+                                        </span>
+                                    )}
                                     {ocrInspect.rotation ? ` · rotated ${ocrInspect.rotation}°` : ''}
                                     {ocrInspect.refined.length > 0 ? ` · ${ocrInspect.refined.length} field${ocrInspect.refined.length > 1 ? 's' : ''} refined by region re-scan` : ''}
                                 </span>
@@ -535,12 +602,44 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                                             <div key={f.key} className={`flex items-center gap-2 text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                                                 <span className={`w-2 h-2 rounded-full shrink-0 ${f.value ? 'bg-emerald-500' : 'bg-rose-400'}`} />
                                                 <span className="w-24 shrink-0 font-bold">{f.label}</span>
+                                                {typeof f.confidence === 'number' && (
+                                                    <span className="w-12 h-1.5 rounded-full bg-slate-700/50 shrink-0 overflow-hidden">
+                                                        <span
+                                                            className={`block h-full rounded-full ${f.confidence >= 80 ? 'bg-emerald-500' : f.confidence >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                                                            style={{ width: `${f.confidence}%` }}
+                                                        />
+                                                    </span>
+                                                )}
                                                 <span className={`font-mono font-bold ${f.value ? (isDark ? 'text-slate-100' : 'text-slate-900') : (isDark ? 'text-slate-600' : 'text-slate-400')}`}>{f.value || '—'}</span>
                                                 {f.refined && <span className="shrink-0 px-1 rounded bg-blue-500/20 text-blue-400 text-[9px] font-extrabold">region</span>}
                                                 {f.source && <span className="truncate opacity-60">· {f.source}</span>}
                                             </div>
                                         ))}
                                     </div>
+                                    {typeof ocrInspect.score === 'number' && (
+                                        <div className={`flex items-center gap-2 text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                                            <span className="font-extrabold">Model score</span>
+                                            <span className={`font-extrabold ${ocrInspect.score >= 80 ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : ocrInspect.score >= 50 ? (isDark ? 'text-amber-400' : 'text-amber-600') : (isDark ? 'text-rose-400' : 'text-rose-600')}`}>
+                                                {ocrInspect.score}/100
+                                            </span>
+                                            <span className="opacity-70">· {ocrInspect.fields.filter(f => f.value).length}/7 fields filled</span>
+                                            <span className="opacity-50">(0 = unreadable, 100 = fully clear — watch this to judge if the model is good enough)</span>
+                                        </div>
+                                    )}
+                                    {scanHistory.length > 0 && (
+                                        <div className={`rounded-lg border p-2 text-[9px] ${isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
+                                            <div className="font-extrabold mb-1 opacity-70">Recent scan scores (kept in this browser — last {Math.min(scanHistory.length, 10)} of {scanHistory.length})</div>
+                                            {[...scanHistory].reverse().slice(0, 10).map((h, i) => (
+                                                <div key={h.ts + '-' + i} className="flex gap-2 opacity-80">
+                                                    <span className="font-mono">{new Date(h.ts).toLocaleTimeString()}</span>
+                                                    <span>{h.model}</span>
+                                                    <span className={`font-extrabold ${h.score >= 80 ? 'text-emerald-500' : h.score >= 50 ? 'text-amber-500' : 'text-rose-500'}`}>{h.score}/100</span>
+                                                    <span>{h.filled}/{h.total} fields</span>
+                                                    {h.plate && <span className="font-mono">{h.plate}</span>}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                     <div className={`max-h-36 overflow-y-auto rounded-lg border p-2 font-mono text-[9px] leading-relaxed ${isDark ? 'border-slate-800 bg-slate-900 text-slate-300' : 'border-slate-200 bg-white text-slate-600'}`}>
                                         {ocrInspect.lines.length === 0 && <div className="opacity-60">No lines read from this photo.</div>}
                                         {ocrInspect.lines.map((l, i) => (

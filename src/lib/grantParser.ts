@@ -33,9 +33,12 @@ export type RegionBand = { field: 'plate' | 'chassis' | 'makeModel' | 'spec' | '
 
 export type GrantInspect = {
     engine: 'cloud' | 'offline'
+    model?: string
+    score?: number // 0-100 overall confidence from the cloud model
+    confidence?: Record<string, number> // per-field 0-100
     rotation: number
     refined: string[]
-    fields: Array<{ key: string; label: string; value: string; source: string; refined: boolean }>
+    fields: Array<{ key: string; label: string; value: string; source: string; refined: boolean; confidence?: number }>
     lines: Array<{ text: string; kind: 'label' | 'value'; labelType?: string; field?: string }>
 }
 
@@ -54,7 +57,7 @@ export function normalizeKey(s: string) {
 }
 
 // Parses OCR lines from a Malaysian vehicle grant (SIJIL PEMILIKAN KENDERAAN).
-// Both OCR engines (Google Vision, Tesseract) mangle the Malay labels and can
+// Both OCR engines (Gemini, Tesseract) mangle the Malay labels and can
 // return the label column and value column as separate blocks, as interleaved
 // rows, or as mangled single lines. Strategy: classify every line as a known
 // label or a value, then find each field's value NEAR its label's position,
@@ -446,17 +449,29 @@ export function extractBandFields(band: RegionBand['field'], rawText: string): P
 
 // Builds the inspect snapshot shown in the intake modal: what each field was
 // filled with, the line it came from, and every OCR line tagged as label/value.
-export function buildGrantInspect(c: GrantClassification, engine: 'cloud' | 'offline', rotation: number, refined: string[] = []): GrantInspect {
+// `extras` carries cloud-model metadata (model id, overall score, per-field
+// confidence) so the UI can monitor how well the model is performing.
+export function buildGrantInspect(
+    c: GrantClassification,
+    engine: 'cloud' | 'offline',
+    rotation: number,
+    refined: string[] = [],
+    extras: { model?: string; score?: number; confidence?: Record<string, number> } = {}
+): GrantInspect {
     return {
         engine,
         rotation,
         refined,
+        model: extras.model,
+        score: extras.score,
+        confidence: extras.confidence,
         fields: Object.keys(FIELD_LABELS).map(key => ({
             key,
             label: FIELD_LABELS[key],
             value: (c.parsed as Record<string, string>)[key] || '',
             source: c.sources[key] || '',
             refined: refined.includes(key),
+            confidence: extras.confidence ? extras.confidence[key] || 0 : undefined,
         })),
         lines: c.lineRecords.map(r => ({ text: r.text, kind: r.kind, labelType: r.labelType, field: r.field })),
     }
