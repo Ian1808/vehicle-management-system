@@ -3,259 +3,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { useJPJPlate } from '@/hooks/useJPJPlate'
 import { getVehicleMakes, getModelsForMake, getYearsForVehicle, getVariantsForModel } from '@/services/vehicleDatabaseService'
-
-type ParsedGrant = {
-    plate: string
-    chassis: string
-    make: string
-    model: string
-    variant: string
-    spec: string
-    year: string
-}
-
-function normalizeKey(s: string) {
-    return s.toUpperCase().replace(/[^A-Z0-9]/g, '')
-}
-
-// Parses OCR text from a Malaysian vehicle grant (SIJIL PEMILIKAN KENDERAAN).
-// Both OCR engines (Google Vision, Tesseract) mangle the Malay labels and can
-// return the label column and value column as separate blocks, as interleaved
-// rows, or as mangled single lines. Strategy: classify every line as a known
-// label or a value, then find each field's value NEAR its label's position,
-// verifying it by the value's distinctive SHAPE (plate / VIN / digits / year).
-function parseGrantText(raw: string): ParsedGrant {
-    const lines = raw
-        .toUpperCase()
-        .replace(/\r/g, '')
-        .split('\n')
-        .map(l => l.replace(/\s+/g, ' ').trim())
-        .filter(Boolean)
-    const result: ParsedGrant = { plate: '', chassis: '', make: '', model: '', variant: '', spec: '', year: '' }
-
-    // Known grant labels, in priority order (a line can match several — e.g.
-    // "Tarikh Pendaftaran" is a date label, not the plate label). All regexes
-    // MUST be global ("g") — the classification loop relies on exec() advancing
-    // lastIndex; a non-global exec returns the same first match forever.
-    const LABELS: Array<{ type: string; re: RegExp }> = [
-        { type: 'TAHUN', re: /(?:TAHUN|DIBUAT)/g },
-        { type: 'TARIKH', re: /TARIKH/g },
-        { type: 'KEUPAYAAN', re: /(?:KUUP|KUASA|KEUPAY)\w*\s*(?:ENJIN)?/g },
-        { type: 'CHASIS', re: /CHASS?IS|CHESIS|ENJIN/g },
-        { type: 'SYARAT', re: /SYARAT/g },
-        { type: 'PENDAFTARAN', re: /PENDAFTARAN/g },
-        { type: 'MODEL', re: /(?:BUATAN|BUSTAN|NAMA|NEMA)\s*MODE[!LI1]*|BUATAN|BUSTAN|MODEL|MODE[!LI1]*/g },
-        { type: 'BAHAN', re: /BAHAN/g },
-        { type: 'STATUS', re: /STATUS/g },
-        { type: 'KELAS', re: /KELAS/g },
-        { type: 'BDM', re: /B\.?\s*D\.?\s*M/g },
-        { type: 'PEMUNYA', re: /PEMUNYA|PENUNYA/g },
-        { type: 'ALAMAT', re: /ALAMAT/g },
-        { type: 'ID', re: /(?:^|[^A-Z0-9])ID(?:$|[^A-Z0-9])/g },
-    ]
-
-    // Split every line into a label (if it contains a known field name) or a
-    // value. Vision's text order varies per photo — labels may come first as a
-    // block with all values after (with watermark noise lines before them), or
-    // label/value pairs may be interleaved. So each field is extracted by
-    // searching VALUES ordered by proximity to its label, verifying the value
-    // by its SHAPE (plate / VIN / digits / year) rather than by fixed position.
-    const labels: string[] = []
-    const values: string[] = []
-    const cleanValue = (s: string) =>
-        s.replace(/[^A-Z0-9 .()/-]/g, ' ').replace(/\s+/g, ' ').trim()
-    for (const line of lines) {
-        const entry = LABELS.find(l => {
-            l.re.lastIndex = 0
-            return l.re.test(line)
-        })
-        if (!entry) {
-            values.push(cleanValue(line.replace(/^\s*:\s*/, '')))
-            continue
-        }
-        // Inline value ("LABEL : VALUE" or "LABEL VALUE") = text after the
-        // LAST label keyword occurrence on the line.
-        let lastEnd = -1
-        entry.re.lastIndex = 0
-        let m: RegExpExecArray | null
-        while ((m = entry.re.exec(line)) !== null) {
-            lastEnd = m.index + m[0].length
-            if (entry.re.lastIndex === m.index) entry.re.lastIndex++
-        }
-        labels.push(entry.type)
-        const tail = cleanValue(line.slice(lastEnd).replace(/^\s*:\s*/, ''))
-        // Only keep the tail as a value when it looks like one: it must not
-        // itself contain another label word ("Syarat Pendaftaran 1" → tail
-        // "Pendaftaran 1" is a label fragment, not a value), and it needs a
-        // digit, a "/" separator, or 2+ words ("Berdaftar"/"Bakar"/"Asal" are
-        // label fragments too).
-        if (tail) {
-            const containsLabel = LABELS.some(l => {
-                l.re.lastIndex = 0
-                return l.re.test(tail)
-            })
-            if (!containsLabel && (/\d/.test(tail) || tail.includes('/') || tail.split(/\s+/).filter(Boolean).length >= 2)) {
-                values.push(tail)
-            }
-        }
-    }
-
-    const idxOf = (type: string) => labels.lastIndexOf(type)
-    // Value indices ordered by distance from the label position (-1 = all).
-    const near = (labelIdx: number): number[] => {
-        const idx = Array.from({ length: values.length }, (_, i) => i)
-        if (labelIdx === -1) return idx
-        return idx.sort((a, b) => Math.abs(a - labelIdx) - Math.abs(b - labelIdx))
-    }
-    const isBodyTypeLine = (v: string) => v.includes('MOTOKAR') || v.includes('WINDOW')
-
-    // --- plate: the first value containing a plate-shaped token
-    let plateIdx = -1
-    for (let i = 0; i < values.length && plateIdx === -1; i++) {
-        for (const t of values[i].split(/[^A-Z0-9]+/).filter(Boolean)) {
-            if (/^[A-Z]{1,3}\d{1,4}[A-Z]?$/.test(t)) {
-                result.plate = t
-                plateIdx = i
-                break
-            }
-        }
-    }
-
-    // --- chassis: the VIN-shaped token nearest the chassis label (14+ alnum,
-    // letters AND digits, found inside the line). Chassis+engine often merge
-    // without a separator, so keep the first 17 chars (standard VIN length).
-    const chassisLabelIdx = idxOf('CHASIS')
-    let chassisIdx = -1
-    for (const i of near(chassisLabelIdx)) {
-        const v = values[i]
-        // The part before a "/" separator is the chassis when engine number
-        // shares the line; OCR junk may also prefix the VIN on the same line.
-        const m = v.split('/')[0].match(/(?:^|[^A-Z0-9])([A-Z][A-Z0-9]{13,})(?:$|[^A-Z0-9])/)
-        if (!m) continue
-        const t = m[1]
-        const c = t.length > 18 ? t.slice(0, 17) : t
-        if (/[A-Z]/.test(c) && /\d/.test(c)) {
-            result.chassis = c
-            chassisIdx = i
-            break
-        }
-    }
-
-    // --- make/model: prefer the value nearest the MODEL label that starts
-    // with a known make; only if none exists, fall back to a proximity score.
-    const mmLabelIdx = idxOf('MODEL')
-    let mmValIdx = -1
-    const mmCandidates = near(mmLabelIdx)
-        .map(i => ({ i, v: values[i] }))
-        .filter(({ v }) => {
-            const tokens = v.split(/\s+/).filter(Boolean)
-            // 2+ words, and not an all-digits line (ID number / capacity).
-            return tokens.length >= 2 && !/^[0-9\s]+$/.test(v)
-        })
-    const rankedMakes = [...getVehicleMakes()].sort((a, b) => normalizeKey(b).length - normalizeKey(a).length)
-    let knownHit: { i: number; v: string } | null = null
-    let knownDist = Infinity
-    for (const c of mmCandidates) {
-        const norm = normalizeKey(c.v)
-        if (rankedMakes.some(mk => norm.startsWith(normalizeKey(mk)))) {
-            const d = mmLabelIdx === -1 ? c.i : Math.abs(c.i - mmLabelIdx)
-            if (d < knownDist) {
-                knownDist = d
-                knownHit = c
-            }
-        }
-    }
-    const mmHit = knownHit ?? mmCandidates.reduce<{ i: number; v: string; score: number } | null>(
-        (best, c) => {
-            const d = mmLabelIdx === -1 ? c.i : Math.abs(c.i - mmLabelIdx)
-            let score = -d * 0.5
-            if (c.v.includes('/')) score += 1.5
-            if (c.v.split(/\s+/).length <= 5) score += 1
-            return !best || score > best.score ? { ...c, score } : best
-        },
-        null
-    )
-    if (mmHit) {
-        mmValIdx = mmHit.i
-        const parts = mmHit.v.split('/').map(s => s.trim()).filter(Boolean)
-        if (parts.length >= 2) {
-            result.make = parts[0]
-            result.model = parts.slice(1).join(' / ')
-        } else {
-            const tk = mmHit.v.split(/\s+/).filter(Boolean)
-            result.make = tk[0]
-            result.model = tk.slice(1).join(' ')
-        }
-    }
-
-    // --- spec: engine capacity near the KEUPAYAAN label. Values already
-    // claimed by plate/chassis/make-model and body-type lines are excluded.
-    // Prefer a STANDALONE digit line ("3498") over digits embedded in an
-    // address ("977 JALAN ... 6 ..."), and OCR sometimes prepends a junk
-    // digit ("11799" for 1799) — then the last 4 digits of the label's own
-    // line are used.
-    const specLabelIdx = idxOf('KEUPAYAAN')
-    const specSkip = (i: number) =>
-        i === plateIdx || i === mmValIdx || i === chassisIdx || isBodyTypeLine(values[i])
-    let specValIdx = -1
-    const standaloneDigits = (v: string) => /^[0-9\s]+$/.test(v)
-    for (const i of near(specLabelIdx)) {
-        if (specSkip(i)) continue
-        const v = values[i]
-        const digits = v.replace(/[^0-9]/g, '')
-        if ((digits.length === 3 || digits.length === 4) && standaloneDigits(v)) {
-            result.spec = digits
-            specValIdx = i
-            break
-        }
-    }
-    if (!result.spec) {
-        for (const i of near(specLabelIdx)) {
-            if (specSkip(i)) continue
-            const digits = values[i].replace(/[^0-9]/g, '')
-            if (digits.length === 3 || digits.length === 4) {
-                result.spec = digits
-                specValIdx = i
-                break
-            }
-        }
-    }
-    if (!result.spec) {
-        for (const i of near(specLabelIdx)) {
-            if (specSkip(i)) continue
-            const digits = values[i].replace(/[^0-9]/g, '')
-            if (digits.length !== 5) continue
-            const d = specLabelIdx === -1 ? i : Math.abs(i - specLabelIdx)
-            if (d <= 1) {
-                result.spec = digits.slice(-4)
-                specValIdx = i
-                break
-            }
-        }
-    }
-
-    // --- year: the standalone 19xx/20xx token nearest the TAHUN label (never
-    // a date, never a value already claimed by another field).
-    const yearLabelIdx = idxOf('TAHUN')
-    for (const i of near(yearLabelIdx)) {
-        if (i === plateIdx || i === mmValIdx || i === chassisIdx || i === specValIdx) continue
-        const v = values[i] || ''
-        if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(v)) continue
-        const m = v.match(/(?:^|[^0-9])((?:19|20)\d{2})(?:$|[^0-9])/)
-        if (m) {
-            result.year = m[1]
-            break
-        }
-    }
-
-    // Variant = everything after the base model name, e.g. "CIVIC 1.8L I-VTEC (A)" → "1.8L I-VTEC (A)".
-    const modelTokens = result.model.split(/\s+/).filter(Boolean)
-    if (modelTokens.length >= 2) {
-        result.variant = modelTokens.slice(1).join(' ')
-    }
-
-    return result
-}
+import {
+    buildGrantInspect,
+    classifyGrantLines,
+    extractBandFields,
+    FIELD_LABELS,
+    normalizeKey,
+    planRegionBands,
+    scoreGrant,
+} from '@/lib/grantParser'
+import type { BBox, GrantClassification, GrantInspect, ParsedGrant } from '@/lib/grantParser'
 
 // Decodes the photo once and returns four grayscale, upscaled variants
 // (0°/90°/180°/270°) so OCR can be tried in every orientation.
@@ -310,19 +67,6 @@ async function makeGrantVariants(file: File): Promise<GrantVariant[]> {
     }
 }
 
-// Higher = the OCR result looks more like a readable grant. Used to pick the
-// best rotation and to stop early when the upright pass already parsed well.
-function scoreGrant(p: ParsedGrant): number {
-    let s = 0
-    if (p.plate) s += 2
-    if (p.chassis) s += 2
-    if (p.make) s += 1
-    if (p.model) s += 1
-    if (p.year) s += 1
-    if (p.spec) s += 1
-    return s
-}
-
 function matchOption(options: string[], target: string): string | null {
     const t = normalizeKey(target)
     if (!t) return null
@@ -333,6 +77,90 @@ function matchOption(options: string[], target: string): string | null {
         .sort((a, b) => normalizeKey(b).length - normalizeKey(a).length)
     if (contained.length) return contained[0]
     return options.find(o => normalizeKey(o).includes(t)) || null
+}
+
+// Minimal structural type for the tesseract.js worker — only what the region
+// re-scan pass needs (recognize + terminate), so no full type import required.
+type OcrWorker = {
+    recognize(blob: Blob): Promise<{ data: { text: string } }>
+    terminate(): Promise<unknown>
+}
+
+// Crops a horizontal band out of the (already rotated, 2x) variant image and
+// upscales it 2x more (4x effective) on a white background so the re-scan reads
+// only that row's text at higher zoom.
+async function cropBand(blob: Blob | File, bbox: BBox): Promise<Blob | null> {
+    try {
+        const bitmap = await createImageBitmap(blob)
+        const bw = bitmap.width
+        const bh = bitmap.height
+        const bandH = Math.max(6, bbox.y1 - bbox.y0)
+        const top = Math.max(0, Math.round(bbox.y0 - bandH * 0.5))
+        const bottom = Math.min(bh, Math.round(bbox.y1 + bandH * 0.5))
+        const scale = 2
+        const cw = Math.max(1, Math.round(bw * scale))
+        const ch = Math.max(1, Math.round((bottom - top) * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = cw
+        canvas.height = ch
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+            bitmap.close()
+            return null
+        }
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, cw, ch)
+        ctx.drawImage(bitmap, 0, top, bw, bottom - top, 0, 0, cw, ch)
+        bitmap.close()
+        const imageData = ctx.getImageData(0, 0, cw, ch)
+        const d = imageData.data
+        for (let i = 0; i < d.length; i += 4) {
+            const gray = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
+            d[i] = gray
+            d[i + 1] = gray
+            d[i + 2] = gray
+        }
+        ctx.putImageData(imageData, 0, 0)
+        return await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/png'))
+    } catch {
+        return null
+    }
+}
+
+// Region re-scan pass: for every field whose row was located on the winning
+// orientation, crop that row, re-OCR it at higher zoom, and keep the focused
+// read when it yields a shape-valid value. Fields the crop could not read keep
+// the whole-page value — a misaligned crop can never corrupt a field.
+async function refineByRegions(
+    worker: OcrWorker,
+    variantBlob: Blob | File,
+    classification: GrantClassification,
+    onStatus: (s: string) => void
+): Promise<{ parsed: ParsedGrant; refined: string[] }> {
+    const merged = { ...classification.parsed }
+    const refined: string[] = []
+    for (const band of planRegionBands(classification)) {
+        if (!band.bbox) continue
+        onStatus(`Refining ${FIELD_LABELS[band.field]} row…`)
+        const crop = await cropBand(variantBlob, band.bbox)
+        if (!crop) continue
+        let bandText = ''
+        try {
+            const { data } = await worker.recognize(crop)
+            bandText = data.text
+        } catch {
+            continue
+        }
+        if (!bandText.trim()) continue
+        const picked = extractBandFields(band.field, bandText)
+        for (const key of Object.keys(picked) as Array<keyof ParsedGrant>) {
+            if (picked[key]) {
+                merged[key] = picked[key] as string
+                refined.push(key)
+            }
+        }
+    }
+    return { parsed: merged, refined }
 }
 
 // Downsizes the photo to a compact JPEG for the cloud path. Google Vision
@@ -359,11 +187,12 @@ async function compressForCloud(file: File): Promise<string> {
 }
 
 // Calls the server route that proxies to Google Cloud Vision. Returns
-// { parsed } on a successful scan, { unavailable: true } when the route
-// reports no key / an API error (so the UI can hint at setup), or null when
-// the scan itself failed (no text / timeout) and the offline fallback should
-// run. A 25s timeout guarantees the scanner can never spin forever.
-async function tryCloudOcr(file: File): Promise<{ parsed: ParsedGrant } | { unavailable: true } | null> {
+// { parsed, classification } on a successful scan, { unavailable: true } when
+// the route reports no key / an API error (so the UI can hint at setup), or
+// null when the scan itself failed (no text / timeout) and the offline
+// fallback should run. A 25s timeout guarantees the scanner can never spin
+// forever.
+async function tryCloudOcr(file: File): Promise<{ parsed: ParsedGrant; classification: GrantClassification } | { unavailable: true } | null> {
     try {
         const imageBase64 = await compressForCloud(file)
         const controller = new AbortController()
@@ -379,9 +208,11 @@ async function tryCloudOcr(file: File): Promise<{ parsed: ParsedGrant } | { unav
             if (!res.ok) return null
             const data = await res.json()
             if (!data?.text) return null
-            const parsed = parseGrantText(data.text)
-            if (scoreGrant(parsed) === 0) return null
-            return { parsed }
+            const classification = classifyGrantLines(
+                data.text.replace(/\r/g, '').split('\n').map((l: string) => ({ text: l }))
+            )
+            if (scoreGrant(classification.parsed) === 0) return null
+            return { parsed: classification.parsed, classification }
         } finally {
             clearTimeout(timer)
         }
@@ -429,6 +260,8 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     const [ocrPass, setOcrPass] = useState(0)
     const [manualOverride, setManualOverride] = useState(false)
     const [ocrFields, setOcrFields] = useState<ParsedGrant | null>(null)
+    const [ocrInspect, setOcrInspect] = useState<GrantInspect | null>(null)
+    const [showInspect, setShowInspect] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const isOpenRef = useRef(isOpen)
     useEffect(() => {
@@ -449,6 +282,8 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         setIntakeCost('')
         setManualOverride(false)
         setOcrFields(null)
+        setOcrInspect(null)
+        setShowInspect(false)
         setOcrBusy(false)
         setOcrStatus('')
         setOcrPass(0)
@@ -539,19 +374,20 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                 if (cloudResult && 'parsed' in cloudResult) {
                     if (!isOpenRef.current) return
                     setOcrStatus('parsing')
+                    setOcrInspect(buildGrantInspect(cloudResult.classification, 'cloud', 0))
                     applyParsed(cloudResult.parsed, 0)
                     return
                 }
                 cloudUnavailable = cloudResult !== null && 'unavailable' in cloudResult
             }
 
-            // 2) Offline Tesseract fallback (tries 0°/90°/180°/270°).
+            // 2) Offline Tesseract (tries 0°/90°/180°/270°; keeps the best).
             setOcrStatus('loading')
             const { createWorker } = await import('tesseract.js')
             if (!isOpenRef.current) return
             const worker = await createWorker('eng')
             const variants = await makeGrantVariants(file)
-            let best: { parsed: ParsedGrant; rotation: number } | null = null
+            let best: { parsed: ParsedGrant; rotation: number; variantBlob: Blob | File; classification: GrantClassification } | null = null
             for (let i = 0; i < variants.length; i++) {
                 setOcrStatus('reading')
                 setOcrPass(i + 1)
@@ -560,17 +396,26 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                     await worker.terminate()
                     return
                 }
-                const parsed = parseGrantText(data.text)
-                const score = scoreGrant(parsed)
+                // tesseract.js runtime returns line geometry under `lines`,
+                // but its shipped typings omit it — read it via a narrow cast.
+                const ocrLines = (data as { lines?: Array<{ text: string; bbox?: BBox }> }).lines || []
+                const classification = classifyGrantLines(
+                    ocrLines.map(l => ({ text: l.text, bbox: l.bbox }))
+                )
+                const score = scoreGrant(classification.parsed)
                 if (!best || score > scoreGrant(best.parsed)) {
-                    best = { parsed, rotation: variants[i].rotation }
+                    best = { parsed: classification.parsed, rotation: variants[i].rotation, variantBlob: variants[i].blob, classification }
                 }
                 if (score >= 5) break // this orientation parsed well — no need to try the rest
             }
-            await worker.terminate()
-            if (!isOpenRef.current) return
+            if (!isOpenRef.current) {
+                await worker.terminate()
+                return
+            }
             setOcrStatus('parsing')
             if (!best || scoreGrant(best.parsed) === 0) {
+                if (best) setOcrInspect(buildGrantInspect(best.classification, 'offline', best.rotation))
+                await worker.terminate()
                 if (cloudUnavailable) {
                     showToast('Google Vision is unavailable (check the API key in .env.local) and the offline scan could not read this photo either. Please fill in the details manually.', 'error')
                 } else {
@@ -578,7 +423,14 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                 }
                 return
             }
-            applyParsed(best.parsed, best.rotation)
+
+            // 3) Region re-scan: crop each located field row and re-OCR it at a
+            // higher zoom. Fields the crop cannot read keep the whole-page value.
+            const refined = await refineByRegions(worker, best.variantBlob, best.classification, s => setOcrStatus(s))
+            await worker.terminate()
+            if (!isOpenRef.current) return
+            setOcrInspect(buildGrantInspect(best.classification, 'offline', best.rotation, refined.refined))
+            applyParsed(refined.parsed, best.rotation)
         } catch {
             showToast('Photo scan failed. Please fill in the details manually.', 'error')
         } finally {
@@ -661,6 +513,49 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                             Upload a photo of the vehicle grant (SIJIL PEMILIKAN KENDERAAN) to auto-fill plate, chassis, make, model, spec &amp; year — any orientation works. Review the fields before saving.
                         </p>
                     </div>
+
+                    {ocrInspect && (
+                        <div className={`mb-1 rounded-2xl border p-3 ${isDark ? 'border-slate-700 bg-slate-950/60' : 'border-slate-200 bg-slate-50'}`}>
+                            <button
+                                type="button"
+                                onClick={() => setShowInspect(v => !v)}
+                                className={`w-full flex items-center justify-between text-[11px] font-extrabold cursor-pointer ${isDark ? 'text-slate-300' : 'text-slate-700'}`}
+                            >
+                                <span>
+                                    🔍 OCR details — {ocrInspect.engine === 'cloud' ? 'Google Vision' : 'offline engine'}
+                                    {ocrInspect.rotation ? ` · rotated ${ocrInspect.rotation}°` : ''}
+                                    {ocrInspect.refined.length > 0 ? ` · ${ocrInspect.refined.length} field${ocrInspect.refined.length > 1 ? 's' : ''} refined by region re-scan` : ''}
+                                </span>
+                                <span>{showInspect ? '▾' : '▸'}</span>
+                            </button>
+                            {showInspect && (
+                                <div className="mt-2 space-y-2">
+                                    <div className="grid grid-cols-1 gap-1">
+                                        {ocrInspect.fields.map(f => (
+                                            <div key={f.key} className={`flex items-center gap-2 text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                                                <span className={`w-2 h-2 rounded-full shrink-0 ${f.value ? 'bg-emerald-500' : 'bg-rose-400'}`} />
+                                                <span className="w-24 shrink-0 font-bold">{f.label}</span>
+                                                <span className={`font-mono font-bold ${f.value ? (isDark ? 'text-slate-100' : 'text-slate-900') : (isDark ? 'text-slate-600' : 'text-slate-400')}`}>{f.value || '—'}</span>
+                                                {f.refined && <span className="shrink-0 px-1 rounded bg-blue-500/20 text-blue-400 text-[9px] font-extrabold">region</span>}
+                                                {f.source && <span className="truncate opacity-60">· {f.source}</span>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className={`max-h-36 overflow-y-auto rounded-lg border p-2 font-mono text-[9px] leading-relaxed ${isDark ? 'border-slate-800 bg-slate-900 text-slate-300' : 'border-slate-200 bg-white text-slate-600'}`}>
+                                        {ocrInspect.lines.length === 0 && <div className="opacity-60">No lines read from this photo.</div>}
+                                        {ocrInspect.lines.map((l, i) => (
+                                            <div key={i} className={l.field ? (isDark ? 'bg-blue-500/10 text-blue-200' : 'bg-blue-50 text-blue-700') : undefined}>
+                                                <span className={l.kind === 'label' ? (isDark ? 'text-amber-400' : 'text-amber-600') : 'opacity-70'}>
+                                                    [{l.kind === 'label' ? `label ${l.labelType || ''}` : 'value'}{l.field ? ` → ${l.field}` : ''}]
+                                                </span>{' '}
+                                                {l.text}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     <div>
                         <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Plate Number *</label>
