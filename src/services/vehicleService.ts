@@ -2,15 +2,25 @@ import { createClient } from '@/utils/supabase/client'
 
 const supabase = createClient()
 
-export async function fetchActiveVehicles() {
-    const { data, error } = await supabase
-        .from('vehicles')
-        .select('*')
-        .eq('is_deleted', false)
-        .order('created_at', { ascending: false })
+export async function fetchActiveVehicles(companyId?: string | null) {
+    const base = () => supabase.from('vehicles').select('*').eq('is_deleted', false)
 
-    if (error) throw new Error(error.message)
-    return data || []
+    let query = base()
+    if (companyId) query = base().eq('company_id', companyId)
+
+    const { data, error } = await query.order('created_at', { ascending: false })
+
+    if (!error) return data || []
+
+    // company_id may not exist yet if the DB migration hasn't been run —
+    // degrade to unscoped listing so existing staff keep working.
+    if (companyId && error.message.includes('company_id')) {
+        console.warn('[vehicleService] company_id column missing — company scoping disabled until DB migration runs')
+        const { data: fallback, error: fbErr } = await base().order('created_at', { ascending: false })
+        if (!fbErr) return fallback || []
+    }
+
+    throw new Error(error.message)
 }
 
 export async function fetchVehicleMedia(vehicleId: string) {
@@ -31,6 +41,7 @@ export async function insertVehicle(vehicleData: {
     intake_cost?: number
     market_value?: number
     created_by?: string | null
+    company_id?: string | null
     // UI-only payload keys carried by the intake modal; never sent to PostgREST.
     grantFile?: File | null
     ocrScan?: object | null
@@ -47,6 +58,7 @@ export async function insertVehicle(vehicleData: {
             intake_cost: vehicleData.intake_cost,
             market_value: vehicleData.market_value,
             created_by: vehicleData.created_by,
+            company_id: vehicleData.company_id,
             status: 'intake',
             repair_cost: 0,
         }

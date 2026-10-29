@@ -110,12 +110,12 @@ export default function TechnicianModule() {
 
                 const { data: userData } = await supabase
                     .from('users')
-                    .select('role, full_name, username')
+                    .select('role, full_name, username, company_id')
                     .eq('id', user.id)
                     .single()
 
-                if (!userData || (userData.role !== 'technician' && userData.role !== 'admin')) {
-                    showToast('Access Denied: Technician / Admin only.', 'error')
+                if (!userData || (userData.role !== 'technician' && userData.role !== 'admin' && userData.role !== 'manager')) {
+                    showToast('Access Denied: Technician / Manager / Admin only.', 'error')
                     setTimeout(() => { window.location.href = '/' }, 1500)
                     return
                 }
@@ -123,12 +123,34 @@ export default function TechnicianModule() {
                 setSettingsFullName(userData.full_name || '')
                 setSettingsUsername(userData.username || '')
 
-                const { data: list, error: fetchErr } = await supabase
+                let queueQuery = supabase
                     .from('vehicles')
                     .select('*')
                     .in('status', ['pending_before_photos', 'in_repair', 'pending_after_photos', 'completed'])
                     .eq('is_deleted', false)
-                    .order('created_at', { ascending: false })
+
+                if (userData.role !== 'admin') {
+                    queueQuery = queueQuery.eq('company_id', userData.company_id || '')
+                }
+
+                const { data: list, error: fetchErr } = await queueQuery.order('created_at', { ascending: false })
+
+                // company_id may not exist yet if the DB migration hasn't been run —
+                // degrade to unscoped queue so existing technicians keep working.
+                if (fetchErr && userData.role !== 'admin' && fetchErr.message.includes('company_id')) {
+                    console.warn('[TechnicianModule] company_id column missing — company scoping disabled until DB migration runs')
+                    const fallback = await supabase
+                        .from('vehicles')
+                        .select('*')
+                        .in('status', ['pending_before_photos', 'in_repair', 'pending_after_photos', 'completed'])
+                        .eq('is_deleted', false)
+                        .order('created_at', { ascending: false })
+                    if (!fallback.error) {
+                        setVehicles(fallback.data || [])
+                        setLoading(false)
+                        return
+                    }
+                }
 
                 if (fetchErr) throw fetchErr
                 setVehicles(list || [])

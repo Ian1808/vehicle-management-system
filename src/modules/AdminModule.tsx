@@ -33,6 +33,8 @@ type Vehicle = {
     repair_cost: number
     is_deleted?: boolean
     created_at: string
+    company_id?: string | null
+    companies?: { name: string } | null
 }
 
 type UserProfile = {
@@ -43,6 +45,14 @@ type UserProfile = {
     role: string
     is_suspended?: boolean
     last_login?: string
+    created_at?: string
+    company_id?: string | null
+    companies?: { id: string; name: string } | null
+}
+
+type CompanyRecord = {
+    id: string
+    name: string
     created_at?: string
 }
 
@@ -84,12 +94,13 @@ type ScanLogEntry = {
 const TABS = [
     { key: 'vehicles', label: '🚗 Vehicle Master Registry' },
     { key: 'users', label: '👥 Staff & User Management' },
+    { key: 'companies', label: '🏢 Companies' },
     { key: 'banks', label: '🏦 Panel Bank Criteria' },
     { key: 'scanlogs', label: '🔍 OCR Scan Scores' },
     { key: 'trash', label: '🗑️ Trash / Recovery' },
 ] as const
 
-const ROLE_FILTERS = ['all', 'admin', 'front_desk', 'technician'] as const
+const ROLE_FILTERS = ['all', 'admin', 'manager', 'front_desk', 'technician'] as const
 
 const DOCUMENT_CATEGORIES = ['grant', 'jpj', 'insurance', 'ber'] as const
 
@@ -107,11 +118,12 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 export default function AdminModule() {
-    const [activeTab, setActiveTab] = useState<'vehicles' | 'users' | 'banks' | 'scanlogs' | 'trash'>('vehicles')
+    const [activeTab, setActiveTab] = useState<'vehicles' | 'users' | 'companies' | 'banks' | 'scanlogs' | 'trash'>('vehicles')
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [deletedVehicles, setDeletedVehicles] = useState<Vehicle[]>([])
     const [banks, setBanks] = useState<BankRecord[]>([])
     const [users, setUsers] = useState<UserProfile[]>([])
+    const [companies, setCompanies] = useState<CompanyRecord[]>([])
     const [scanLogs, setScanLogs] = useState<ScanLogEntry[]>([])
     const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
@@ -128,7 +140,8 @@ export default function AdminModule() {
 
     // New Staff User Modal State
     const [showUserModal, setShowUserModal] = useState(false)
-    const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'front_desk' | 'technician'>('all')
+    const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'manager' | 'front_desk' | 'technician'>('all')
+    const [newCompanyName, setNewCompanyName] = useState('')
 
     // Edit User Password Modal State
     const [editingPasswordUser, setEditingPasswordUser] = useState<UserProfile | null>(null)
@@ -187,7 +200,8 @@ export default function AdminModule() {
         await Promise.all([
             fetchDeletedVehicles(),
             fetchBanks(),
-            fetchUsers()
+            fetchUsers(),
+            fetchCompanies()
         ])
         await fetchScanLogs(vehiclesList)
         setLoading(false)
@@ -196,13 +210,23 @@ export default function AdminModule() {
     async function fetchVehicles(): Promise<Vehicle[]> {
         const { data, error } = await supabase
             .from('vehicles')
-            .select('*')
+            .select('*, companies(name)')
             .eq('is_deleted', false)
             .order('created_at', { ascending: false })
 
         if (error) {
-            showToast(error.message, 'error')
-            return []
+            // companies table may not exist yet if the DB migration hasn't been run
+            console.warn('vehicles→companies join failed, falling back to plain vehicles:', error.message)
+            const fallback = await supabase
+                .from('vehicles')
+                .select('*')
+                .eq('is_deleted', false)
+                .order('created_at', { ascending: false })
+            if (fallback.error) {
+                showToast(fallback.error.message, 'error')
+                return []
+            }
+            return fallback.data || []
         }
         setVehicles(data || [])
         return data || []
@@ -235,11 +259,36 @@ export default function AdminModule() {
     async function fetchUsers() {
         const { data, error } = await supabase
             .from('users')
-            .select('*')
+            .select('*, companies(id, name)')
             .order('full_name', { ascending: true })
 
-        if (error) showToast(error.message, 'error')
-        else setUsers(data || [])
+        if (error) {
+            // companies table may not exist yet if the DB migration hasn't been run
+            console.warn('users→companies join failed, falling back to plain users:', error.message)
+            const fallback = await supabase
+                .from('users')
+                .select('*')
+                .order('full_name', { ascending: true })
+
+            if (fallback.error) showToast(fallback.error.message, 'error')
+            else setUsers(fallback.data || [])
+        } else {
+            setUsers(data || [])
+        }
+    }
+
+    async function fetchCompanies() {
+        const { data, error } = await supabase
+            .from('companies')
+            .select('*')
+            .order('name', { ascending: true })
+
+        if (error) {
+            console.warn('Companies table might not exist yet:', error.message)
+            setCompanies([])
+        } else {
+            setCompanies(data || [])
+        }
     }
 
     async function fetchScanLogs(vehiclesList: Vehicle[]) {
@@ -370,6 +419,7 @@ export default function AdminModule() {
                         email: cleanEmail,
                         full_name: payload.fullName.trim(),
                         role: payload.role,
+                        company_id: payload.companyId || null,
                         is_suspended: false,
                     })
             }
@@ -381,6 +431,50 @@ export default function AdminModule() {
             showToast(err.message || 'Failed to create staff account.', 'error')
             return false
         }
+    }
+
+    async function handleCreateCompany() {
+        const name = newCompanyName.trim()
+        if (!name) {
+            showToast('Please enter a company name.', 'error')
+            return
+        }
+        try {
+            const { error } = await supabase
+                .from('companies')
+                .insert([{ name }])
+
+            if (error) throw error
+            setNewCompanyName('')
+            showToast(`Company "${name}" created successfully!`, 'success')
+            await fetchCompanies()
+        } catch (err: unknown) {
+            showToast(err instanceof Error ? err.message : 'Failed to create company.', 'error')
+        }
+    }
+
+    async function handleUpdateUserCompany(userId: string, companyId: string) {
+        const companyName = companies.find(c => c.id === companyId)?.name || 'No company'
+        setConfirmModal({
+            title: 'Confirm Company Change',
+            message: `Move this user to "${companyName}"? Staff in the same company share vehicles and work together.`,
+            confirmText: 'Update Company',
+            confirmVariant: 'success',
+            onConfirm: async () => {
+                setConfirmModal(null)
+                const { error } = await supabase
+                    .from('users')
+                    .update({ company_id: companyId || null })
+                    .eq('id', userId)
+
+                if (error) {
+                    showToast('Error updating company: ' + error.message, 'error')
+                } else {
+                    showToast('User company updated successfully!', 'success')
+                    fetchUsers()
+                }
+            }
+        })
     }
 
     async function handleToggleSuspendUser(userId: string, currentStatus: boolean, name: string) {
@@ -754,6 +848,7 @@ export default function AdminModule() {
     const tabCounts: Record<string, number> = {
         vehicles: vehicles.length,
         users: users.length,
+        companies: companies.length,
         banks: banks.length,
         scanlogs: scanLogs.length,
         trash: deletedVehicles.length,
@@ -786,6 +881,8 @@ export default function AdminModule() {
             {showUserModal && (
                 <StaffUserModal
                     isDark={isDark}
+                    companies={companies.map(c => ({ id: c.id, name: c.name }))}
+                    allowRoles={['admin', 'manager', 'front_desk', 'technician', 'bidder']}
                     onSubmit={handleCreateStaffUser}
                     onClose={() => setShowUserModal(false)}
                 />
@@ -932,6 +1029,11 @@ export default function AdminModule() {
                                                 <StatusBadge status={v.status} />
                                             </div>
                                             <p className={`text-xs font-semibold mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{v.make_model_year}</p>
+                                            {v.companies?.name && (
+                                                <span className={`inline-block mb-3 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${isDark ? 'bg-slate-900 text-purple-300 border-purple-800/60' : 'bg-purple-50 text-purple-600 border-purple-200'}`}>
+                                                    🏢 {v.companies.name}
+                                                </span>
+                                            )}
 
                                             <div className="grid grid-cols-2 gap-2 mb-4">
                                                 <div className={`p-2.5 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
@@ -1125,6 +1227,7 @@ export default function AdminModule() {
                                     <th className="p-4">Full Name & Username</th>
                                     <th className="p-4">Status</th>
                                     <th className="p-4">Role</th>
+                                    <th className="p-4">Company</th>
                                     <th className="p-4">Last Login</th>
                                     <th className="p-4 text-right">Actions</th>
                                 </tr>
@@ -1132,7 +1235,7 @@ export default function AdminModule() {
                             <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
                                 {filteredUsers.length === 0 ? (
                                     <tr>
-                                        <td colSpan={5} className="p-12 text-center text-slate-500">No staff accounts found matching this filter.</td>
+                                        <td colSpan={6} className="p-12 text-center text-slate-500">No staff accounts found matching this filter.</td>
                                     </tr>
                                 ) : (
                                     filteredUsers.map((u) => (
@@ -1156,10 +1259,29 @@ export default function AdminModule() {
                                                     className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer capitalize ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
                                                 >
                                                     <option value="admin">Administrator</option>
+                                                    <option value="manager">Manager</option>
                                                     <option value="front_desk">Front Desk</option>
                                                     <option value="technician">Technician</option>
                                                     <option value="bidder">Bidder</option>
                                                 </select>
+                                            </td>
+                                            <td className="p-4">
+                                                {companies.length > 0 ? (
+                                                    <select
+                                                        value={u.company_id || ''}
+                                                        onChange={(e) => handleUpdateUserCompany(u.id, e.target.value)}
+                                                        className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                                                    >
+                                                        <option value="">— None —</option>
+                                                        {companies.map((c) => (
+                                                            <option key={c.id} value={c.id}>{c.name}</option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    <span className={`text-[11px] font-bold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                                                        {u.companies?.name || '—'}
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className="p-4 text-slate-400 text-[11px]">
                                                 {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never logged in'}
@@ -1220,6 +1342,20 @@ export default function AdminModule() {
                                                 {u.is_suspended ? 'Suspended' : 'Active'}
                                             </span>
                                         </div>
+                                        {companies.length > 0 ? (
+                                            <select
+                                                value={u.company_id || ''}
+                                                onChange={(e) => handleUpdateUserCompany(u.id, e.target.value)}
+                                                className={`w-full border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                                            >
+                                                <option value="">🏢 — None —</option>
+                                                {companies.map((c) => (
+                                                    <option key={c.id} value={c.id}>🏢 {c.name}</option>
+                                                ))}
+                                            </select>
+                                        ) : (
+                                            <p className={`text-[11px] font-bold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>🏢 {u.companies?.name || '—'}</p>
+                                        )}
                                         <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                                             Last login: {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never logged in'}
                                         </p>
@@ -1229,6 +1365,7 @@ export default function AdminModule() {
                                             className={`w-full border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer capitalize ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
                                         >
                                             <option value="admin">Administrator</option>
+                                            <option value="manager">Manager</option>
                                             <option value="front_desk">Front Desk</option>
                                             <option value="technician">Technician</option>
                                             <option value="bidder">Bidder</option>
@@ -1263,6 +1400,67 @@ export default function AdminModule() {
                                 ))
                             )}
                         </div>
+                    </div>
+                )}
+
+                {/* TAB 2.5: COMPANIES */}
+                {activeTab === 'companies' && (
+                    <div>
+                        <SectionHeading
+                            isDark={isDark}
+                            title="Company Management"
+                            subtitle="Create companies and assign managers. Each company's staff and vehicles are isolated from other companies."
+                            right={
+                                <div className="flex gap-2 w-full sm:w-auto">
+                                    <input
+                                        type="text"
+                                        placeholder="New company name"
+                                        value={newCompanyName}
+                                        onChange={(e) => setNewCompanyName(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') handleCreateCompany() }}
+                                        className={`w-full sm:w-56 border rounded-2xl px-4 py-2.5 text-xs font-bold focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                                    />
+                                    <button
+                                        onClick={handleCreateCompany}
+                                        className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2.5 rounded-2xl text-xs font-bold shadow-lg transition-all cursor-pointer"
+                                    >
+                                        + Add Company
+                                    </button>
+                                </div>
+                            }
+                        />
+
+                        {companies.length === 0 ? (
+                            <EmptyState isDark={isDark} message='No companies created yet. Click "+ Add Company" to create one, then assign a Manager to it.' />
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                                {companies.map((c) => {
+                                    const memberCount = users.filter(u => u.company_id === c.id).length
+                                    const vehicleCount = vehicles.filter(v => v.company_id === c.id).length
+                                    const manager = users.find(u => u.company_id === c.id && u.role === 'manager')
+                                    return (
+                                        <Card key={c.id} isDark={isDark} className="p-6 flex flex-col justify-between shadow-xl">
+                                            <div>
+                                                <h3 className={`text-lg font-black tracking-tight mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>🏢 {c.name}</h3>
+                                                <div className="space-y-1.5 text-xs font-semibold">
+                                                    <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>
+                                                        👥 {memberCount} staff member{memberCount === 1 ? '' : 's'}
+                                                    </p>
+                                                    <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>
+                                                        🚗 {vehicleCount} active vehicle{vehicleCount === 1 ? '' : 's'}
+                                                    </p>
+                                                    <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>
+                                                        👑 Manager: <span className={manager ? (isDark ? 'text-purple-300' : 'text-purple-600') : 'text-slate-500'}>
+                                                            {manager ? manager.full_name : 'Not assigned yet'}
+                                                        </span>
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </Card>
+                                    )
+                                })}
+                            </div>
+                        )}
                     </div>
                 )}
 

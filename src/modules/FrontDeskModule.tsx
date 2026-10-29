@@ -87,6 +87,7 @@ export default function FrontDeskModule() {
   const [settingsFullName, setSettingsFullName] = useState('')
   const [settingsUsername, setSettingsUsername] = useState('')
   const [userRole, setUserRole] = useState<string>('')
+  const [userCompanyId, setUserCompanyId] = useState<string | null>(null)
 
   const supabase = createClient()
 
@@ -109,12 +110,12 @@ export default function FrontDeskModule() {
 
         const { data: userData } = await supabase
           .from('users')
-          .select('role, full_name, username')
+          .select('role, full_name, username, company_id')
           .eq('id', user.id)
           .single()
 
-        if (userData && userData.role !== 'front_desk' && userData.role !== 'admin') {
-          showToast('Access Denied: Front Desk / Admin only.', 'error')
+        if (userData && userData.role !== 'front_desk' && userData.role !== 'admin' && userData.role !== 'manager') {
+          showToast('Access Denied: Front Desk / Manager / Admin only.', 'error')
           setTimeout(() => { window.location.href = '/?tab=technician' }, 1500)
           return
         }
@@ -122,8 +123,9 @@ export default function FrontDeskModule() {
         setSettingsFullName(userData?.full_name || '')
         setSettingsUsername(userData?.username || '')
         setUserRole(userData?.role || '')
+        setUserCompanyId(userData?.company_id || null)
 
-        const list = await fetchActiveVehicles()
+        const list = await fetchActiveVehicles(userData?.role === 'admin' ? null : (userData?.company_id || null))
         setVehicles(list)
       } catch (err: any) {
         showToast(err.message || 'Initialization failed', 'error')
@@ -175,7 +177,7 @@ export default function FrontDeskModule() {
         return
       }
 
-      const newId = await insertVehicle({ ...data, created_by: currentUserId })
+      const newId = await insertVehicle({ ...data, created_by: currentUserId, company_id: userCompanyId })
       if (!newId) throw new Error('Vehicle record was created but its ID could not be resolved.')
 
       // Persist the OCR scan-score record for admin monitoring (kept per vehicle).
@@ -221,7 +223,7 @@ export default function FrontDeskModule() {
       }
 
       setShowModal(false)
-      const list = await fetchActiveVehicles()
+      const list = await fetchActiveVehicles(userRole === 'admin' ? null : userCompanyId)
       setVehicles(list)
     } catch (err: any) {
       const msg = err?.message || 'Failed to save vehicle'
@@ -392,7 +394,7 @@ export default function FrontDeskModule() {
           await updateVehicleStatus(selectedVehicle.id, 'pending_before_photos')
           setSelectedVehicle({ ...selectedVehicle, status: 'pending_before_photos' })
           showToast('Vehicle status updated to Pending Before Photos!', 'success')
-          const list = await fetchActiveVehicles()
+          const list = await fetchActiveVehicles(userRole === 'admin' ? null : userCompanyId)
           setVehicles(list)
         } catch (err: any) {
           showToast(err.message || 'Failed to update status', 'error')
