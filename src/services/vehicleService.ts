@@ -31,17 +31,17 @@ export async function insertVehicle(vehicleData: {
     intake_cost?: number
     market_value?: number
     created_by?: string | null
-}) {
-    const { error } = await supabase.from('vehicles').insert([
+}): Promise<string | null> {
+    const { data, error } = await supabase.from('vehicles').insert([
         {
             ...vehicleData,
             status: 'intake',
             repair_cost: 0,
         }
-    ])
+    ]).select('id').single()
 
     if (error) throw new Error(error.message)
-    return true
+    return data?.id ?? null
 }
 
 export async function updateVehicleStatus(vehicleId: string, newStatus: string) {

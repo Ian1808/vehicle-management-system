@@ -71,10 +71,20 @@ type PreviewMedia = {
     title: string
 }
 
+type ScanLogEntry = {
+    plate: string
+    model: string
+    score: number
+    filled: number
+    total: number
+    ts: number
+}
+
 const TABS = [
     { key: 'vehicles', label: '🚗 Vehicle Master Registry' },
     { key: 'users', label: '👥 Staff & User Management' },
     { key: 'banks', label: '🏦 Panel Bank Criteria' },
+    { key: 'scanlogs', label: '🔍 OCR Scan Scores' },
     { key: 'trash', label: '🗑️ Trash / Recovery' },
 ] as const
 
@@ -96,11 +106,12 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 export default function AdminModule() {
-    const [activeTab, setActiveTab] = useState<'vehicles' | 'users' | 'banks' | 'trash'>('vehicles')
+    const [activeTab, setActiveTab] = useState<'vehicles' | 'users' | 'banks' | 'scanlogs' | 'trash'>('vehicles')
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [deletedVehicles, setDeletedVehicles] = useState<Vehicle[]>([])
     const [banks, setBanks] = useState<BankRecord[]>([])
     const [users, setUsers] = useState<UserProfile[]>([])
+    const [scanLogs, setScanLogs] = useState<ScanLogEntry[]>([])
     const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
 
@@ -171,24 +182,29 @@ export default function AdminModule() {
 
     async function fetchAllData() {
         setLoading(true)
+        const vehiclesList = await fetchVehicles()
         await Promise.all([
-            fetchVehicles(),
             fetchDeletedVehicles(),
             fetchBanks(),
             fetchUsers()
         ])
+        await fetchScanLogs(vehiclesList)
         setLoading(false)
     }
 
-    async function fetchVehicles() {
+    async function fetchVehicles(): Promise<Vehicle[]> {
         const { data, error } = await supabase
             .from('vehicles')
             .select('*')
             .eq('is_deleted', false)
             .order('created_at', { ascending: false })
 
-        if (error) showToast(error.message, 'error')
-        else setVehicles(data || [])
+        if (error) {
+            showToast(error.message, 'error')
+            return []
+        }
+        setVehicles(data || [])
+        return data || []
     }
 
     async function fetchDeletedVehicles() {
@@ -223,6 +239,39 @@ export default function AdminModule() {
 
         if (error) showToast(error.message, 'error')
         else setUsers(data || [])
+    }
+
+    async function fetchScanLogs(vehiclesList: Vehicle[]) {
+        const plateById = new Map(vehiclesList.map(v => [v.id, v.plate_number]))
+        const { data, error } = await supabase
+            .from('vehicle_media')
+            .select('vehicle_id, file_url')
+            .eq('media_type', 'scan_log')
+
+        if (error) {
+            console.warn('Could not load OCR scan logs:', error.message)
+            setScanLogs([])
+            return
+        }
+
+        const rows: ScanLogEntry[] = []
+        for (const item of data || []) {
+            try {
+                const payload = JSON.parse(item.file_url)
+                rows.push({
+                    plate: plateById.get(item.vehicle_id) || '(deleted vehicle)',
+                    model: payload.model || 'unknown',
+                    score: Number(payload.score) || 0,
+                    filled: Number(payload.filled) || 0,
+                    total: Number(payload.total) || 7,
+                    ts: Number(payload.ts) || 0,
+                })
+            } catch {
+                /* skip malformed records */
+            }
+        }
+        rows.sort((a, b) => b.ts - a.ts)
+        setScanLogs(rows)
     }
 
     async function fetchMedia(vehicleId: string) {
@@ -658,6 +707,7 @@ export default function AdminModule() {
         vehicles: vehicles.length,
         users: users.length,
         banks: banks.length,
+        scanlogs: scanLogs.length,
         trash: deletedVehicles.length,
     }
 
@@ -1219,7 +1269,74 @@ export default function AdminModule() {
                     </div>
                 )}
 
-                {/* TAB 4: TRASH / RECOVERY */}
+                {/* TAB 4: OCR SCAN SCORES */}
+                {activeTab === 'scanlogs' && (
+                    <div>
+                        <SectionHeading
+                            isDark={isDark}
+                            title="OCR Scan Score Monitoring"
+                            subtitle="Every grant scan that was saved with a vehicle, across all staff — watch the model score to judge if Gemini stays good enough."
+                        />
+
+                        {scanLogs.length === 0 ? (
+                            <EmptyState isDark={isDark} message="No saved scans yet. Scans appear here once a vehicle is added from a scanned grant photo." />
+                        ) : (
+                            <>
+                                <div className="hidden md:block">
+                                    <ResponsiveTable isDark={isDark} minWidth="min-w-[640px]">
+                                        <thead>
+                                            <tr className={`border-b text-xs font-extrabold uppercase tracking-wider ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700'}`}>
+                                                <th className="p-4">Vehicle</th>
+                                                <th className="p-4">Engine</th>
+                                                <th className="p-4">Score</th>
+                                                <th className="p-4">Fields</th>
+                                                <th className="p-4">Scanned At</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
+                                            {scanLogs.map((log, i) => (
+                                                <tr key={log.ts + '-' + i} className={`transition-colors ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
+                                                    <td className="p-4 font-black text-sm text-blue-400">{log.plate}</td>
+                                                    <td className="p-4 font-mono">{log.model}</td>
+                                                    <td className={`p-4 font-extrabold ${log.score >= 80 ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : log.score >= 50 ? (isDark ? 'text-amber-400' : 'text-amber-600') : (isDark ? 'text-rose-400' : 'text-rose-600')}`}>
+                                                        {log.score}/100
+                                                    </td>
+                                                    <td className="p-4">{log.filled}/{log.total}</td>
+                                                    <td className="p-4 text-slate-400 text-[11px]">{log.ts ? new Date(log.ts).toLocaleString() : '—'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </ResponsiveTable>
+                                </div>
+
+                                {/* Mobile card list */}
+                                <div className="md:hidden space-y-3">
+                                    {scanLogs.map((log, i) => (
+                                        <div key={log.ts + '-' + i} className={`border rounded-2xl p-4 flex flex-col gap-2 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="text-sm font-black text-blue-400">{log.plate}</span>
+                                                <span className={`text-sm font-extrabold ${log.score >= 80 ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : log.score >= 50 ? (isDark ? 'text-amber-400' : 'text-amber-600') : (isDark ? 'text-rose-400' : 'text-rose-600')}`}>
+                                                    {log.score}/100
+                                                </span>
+                                            </div>
+                                            <div className={`text-xs space-y-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                <p className="font-mono">{log.model}</p>
+                                                <p>{log.filled}/{log.total} fields filled</p>
+                                                <p>{log.ts ? new Date(log.ts).toLocaleString() : '—'}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        )}
+
+                        <p className={`text-[11px] font-semibold mt-6 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                            Note: scans that were not saved with a vehicle are only kept in the scanning browser&apos;s local history (for testing), not in this list.
+                        </p>
+                    </div>
+                )}
+
+                {/* TAB 5: TRASH / RECOVERY */}
                 {activeTab === 'trash' && (
                     <div>
                         <SectionHeading

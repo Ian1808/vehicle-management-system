@@ -11,6 +11,10 @@ import https from 'node:https'
 // an unbounded request would leave the scanner spinning forever.
 const MODEL = 'gemini-3.8-flash'
 
+// Vercel: scans take ~6-9s against Gemini, so raise the function timeout above
+// the 10s default (Hobby allows up to 60s).
+export const maxDuration = 60
+
 const PROMPT = `You are reading a Malaysian JPJ vehicle ownership certificate (SIJIL PEMILIKAN KENDERAAN / vehicle grant) from a photo. The photo may be rotated in any orientation — orient it yourself.
 
 Extract these fields and return STRICT JSON only (no markdown, no commentary):

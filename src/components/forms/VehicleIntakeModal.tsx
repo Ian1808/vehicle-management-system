@@ -283,6 +283,8 @@ function geminiToClassification(fields: ParsedGrant, text: string): GrantClassif
     return { parsed: fields, lineRecords: base.lineRecords, sources }
 }
 
+export type OcrScanPayload = { model: string; score: number; filled: number; total: number; ts: number }
+
 type Props = {
     isOpen: boolean
     onClose: () => void
@@ -293,12 +295,15 @@ type Props = {
         insurance_panel: string
         intake_cost: number
         market_value: number
+        grantFile?: File | null
+        ocrScan?: OcrScanPayload | null
     }) => void
     isDark: boolean
     showToast: (msg: string, type: 'success' | 'error') => void
+    userRole?: string
 }
 
-export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, showToast }: Props) {
+export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, showToast, userRole }: Props) {
     const { plate, error: plateError, handlePlateChange, setPlate } = useJPJPlate()
 
     const makes = getVehicleMakes()
@@ -319,6 +324,8 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     const [ocrFields, setOcrFields] = useState<ParsedGrant | null>(null)
     const [ocrInspect, setOcrInspect] = useState<GrantInspect | null>(null)
     const [showInspect, setShowInspect] = useState(false)
+    const [grantFile, setGrantFile] = useState<File | null>(null)
+    const [ocrScan, setOcrScan] = useState<OcrScanPayload | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const isOpenRef = useRef(isOpen)
     useEffect(() => {
@@ -347,6 +354,8 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         setOcrBusy(false)
         setOcrStatus('')
         setOcrPass(0)
+        setGrantFile(null)
+        setOcrScan(null)
     }
 
     function handleClose() {
@@ -439,6 +448,10 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                 const classification = geminiToClassification(gemini.fields, gemini.text)
                 setOcrInspect(buildGrantInspect(classification, 'cloud', 0, [], { model: gemini.model, score: overall, confidence: gemini.confidence }))
                 applyParsed(gemini.fields, 0)
+                // Keep the scanned photo + scan record so saving can auto-store the
+                // grant document and persist the score for admin monitoring.
+                setGrantFile(file)
+                setOcrScan({ model: gemini.model, score: overall, filled, total: 7, ts: Date.now() })
                 return
             }
             geminiUnavailable = gemini !== null && 'unavailable' in gemini
@@ -493,6 +506,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
             if (!isOpenRef.current) return
             setOcrInspect(buildGrantInspect(best.classification, 'offline', best.rotation, refined.refined))
             applyParsed(refined.parsed, best.rotation)
+            setGrantFile(file)
         } catch {
             showToast('Photo scan failed. Please fill in the details manually.', 'error')
         } finally {
@@ -528,6 +542,8 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
             insurance_panel: insurancePanel,
             intake_cost: intakeCost ? parseFloat(intakeCost) : 0,
             market_value: marketVal ? parseFloat(marketVal) : 0,
+            grantFile,
+            ocrScan,
         })
     }
 
@@ -576,7 +592,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                         </p>
                     </div>
 
-                    {ocrInspect && (
+                    {ocrInspect && userRole === 'admin' && (
                         <div className={`mb-1 rounded-2xl border p-3 ${isDark ? 'border-slate-700 bg-slate-950/60' : 'border-slate-200 bg-slate-50'}`}>
                             <button
                                 type="button"

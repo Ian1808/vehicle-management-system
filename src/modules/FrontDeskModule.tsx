@@ -8,7 +8,7 @@ import { useTheme } from '@/lib/theme'
 import { PHOTO_CATEGORIES } from '@/lib/photoCategories'
 import { uniqueFileSuffix } from '@/lib/uploadUtils'
 import { getPhotoStageRules } from '@/lib/photoStages'
-import VehicleIntakeModal from '@/components/forms/VehicleIntakeModal'
+import VehicleIntakeModal, { type OcrScanPayload } from '@/components/forms/VehicleIntakeModal'
 import ConfirmModal from '@/components/ui/ConfirmModal'
 import PreviewModal from '@/components/ui/PreviewModal'
 import Toast from '@/components/ui/Toast'
@@ -85,6 +85,7 @@ export default function FrontDeskModule() {
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('')
   const [settingsFullName, setSettingsFullName] = useState('')
   const [settingsUsername, setSettingsUsername] = useState('')
+  const [userRole, setUserRole] = useState<string>('')
 
   const supabase = createClient()
 
@@ -119,6 +120,7 @@ export default function FrontDeskModule() {
 
         setSettingsFullName(userData?.full_name || '')
         setSettingsUsername(userData?.username || '')
+        setUserRole(userData?.role || '')
 
         const list = await fetchActiveVehicles()
         setVehicles(list)
@@ -152,10 +154,55 @@ export default function FrontDeskModule() {
     insurance_panel: string
     intake_cost: number
     market_value: number
+    grantFile?: File | null
+    ocrScan?: OcrScanPayload | null
   }) {
     try {
-      await insertVehicle({ ...data, created_by: currentUserId })
-      showToast('Vehicle successfully registered with Paqar valuation!', 'success')
+      const newId = await insertVehicle({ ...data, created_by: currentUserId })
+      if (!newId) throw new Error('Vehicle record was created but its ID could not be resolved.')
+
+      // Persist the OCR scan-score record for admin monitoring (kept per vehicle).
+      if (data.ocrScan) {
+        try {
+          await supabase.from('vehicle_media').insert([{
+            vehicle_id: newId,
+            media_type: 'scan_log',
+            category: 'scan',
+            file_url: JSON.stringify(data.ocrScan),
+          }])
+        } catch (err: unknown) {
+          console.warn('Could not persist OCR scan log:', err instanceof Error ? err.message : err)
+        }
+      }
+
+      // Auto-store the scanned grant photo as the mandatory Vehicle Grant (VOC) document.
+      if (data.grantFile) {
+        try {
+          const watermarkLabel = `CONFIDENTIAL • ${data.plate_number.toUpperCase()} • GRANT (VOC) • ${new Date().toLocaleDateString()}`
+          const fileToUpload = await addWatermarkToFile(data.grantFile, watermarkLabel)
+          const fileExt = fileToUpload.name.split('.').pop()?.toLowerCase() || 'jpg'
+          const fileName = `${newId}/docs/grant_${uniqueFileSuffix()}.${fileExt}`
+
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('vehicle-files')
+            .upload(fileName, fileToUpload, { cacheControl: '3600', upsert: true })
+          if (uploadError) throw uploadError
+
+          const { data: publicURLData } = supabase.storage.from('vehicle-files').getPublicUrl(uploadData.path)
+          await supabase.from('vehicle_media').insert([{
+            vehicle_id: newId,
+            media_type: 'document',
+            category: 'grant',
+            file_url: publicURLData.publicUrl,
+          }])
+          showToast('Vehicle registered — scanned grant auto-stored as Vehicle Grant (VOC)!', 'success')
+        } catch (err: unknown) {
+          showToast(`Vehicle registered, but grant upload failed: ${err instanceof Error ? err.message : 'unknown error'}`, 'error')
+        }
+      } else {
+        showToast('Vehicle successfully registered with Paqar valuation!', 'success')
+      }
+
       setShowModal(false)
       const list = await fetchActiveVehicles()
       setVehicles(list)
@@ -643,6 +690,7 @@ export default function FrontDeskModule() {
         onSubmit={handleCreateVehicle}
         isDark={isDark}
         showToast={showToast}
+        userRole={userRole}
       />
     </div>
   )
