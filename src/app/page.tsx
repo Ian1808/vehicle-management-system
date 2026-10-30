@@ -215,7 +215,7 @@ export default function MainDashboard() {
                     <div className="flex items-center gap-3 min-w-0">
                         <div className={`w-9 h-9 rounded-2xl border flex items-center justify-center text-base font-black shrink-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>🚗</div>
                         <div className="min-w-0">
-                            <h1 className="text-base font-extrabold tracking-tight truncate">Vehicle Management System</h1>
+                            <h1 className={`text-base font-extrabold tracking-tight truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>Vehicle Management System</h1>
                             <p className={`text-[11px] truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{TAB_META[tab]?.icon} {TAB_META[tab]?.label}</p>
                         </div>
                     </div>
