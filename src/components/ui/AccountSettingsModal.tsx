@@ -238,29 +238,12 @@ export default function AccountSettingsModal({
                             <span className="text-base">🚗</span>
                             <div>
                                 <label className={`block text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>About This App</label>
-                                <p className={`text-[10px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Vehicle Management System · Version 0.1.0</p>
+                                <p className={`text-[10px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Vehicle Management System · Version 2.0.0</p>
                             </div>
                         </div>
                         <p className={`text-xs leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                            Multi-company workshop operations platform for vehicle intake, photo evidence, OCR grant scanning, panel banks &amp; insurance, financial overviews and role-based dashboards — used by Admin, Manager, Staff, Front Desk and Technician.
+                            Manages vehicle intake and registration, repair photo evidence, OCR grant scanning, panel banks &amp; insurance, company staff and financial overviews across multiple companies.
                         </p>
-                        <div className={`mt-3 pt-3 border-t flex flex-col gap-1.5 text-[11px] ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                            <div className="flex justify-between gap-2">
-                                <span className={isDark ? 'text-slate-500' : 'text-slate-400'}>Built with</span>
-                                <span className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Next.js · Supabase · Gemini OCR</span>
-                            </div>
-                            <div className="flex justify-between gap-2">
-                                <span className={`shrink-0 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Repository</span>
-                                <a
-                                    href="https://github.com/Ian1808/vehicle-management-system"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className={`font-semibold truncate underline decoration-dotted underline-offset-2 ${accent === 'blue' ? 'text-blue-400' : 'text-purple-400'} hover:opacity-80`}
-                                >
-                                    github.com/Ian1808/vehicle-management-system
-                                </a>
-                            </div>
-                        </div>
                     </div>
 
                     {error && (
