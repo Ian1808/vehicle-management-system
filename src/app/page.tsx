@@ -7,25 +7,27 @@ import FrontDeskModule from '@/modules/FrontDeskModule'
 import TechnicianModule from '@/modules/TechnicianModule'
 import AdminModule from '@/modules/AdminModule'
 import ManagerStaffModule from '@/modules/ManagerStaffModule'
+import ManagerDashboardModule from '@/modules/ManagerDashboardModule'
 
 type Role = 'admin' | 'manager' | 'front_desk' | 'technician' | 'bidder'
 
 const ROLE_MODULES: Record<string, string> = {
     admin: 'admin',
-    manager: 'frontdesk',
+    manager: 'manager',
     front_desk: 'frontdesk',
     technician: 'technician',
 }
 
 const ALLOWED_TABS: Record<string, string[]> = {
     admin: ['admin', 'frontdesk', 'technician'],
-    manager: ['staff', 'frontdesk', 'technician'],
+    manager: ['manager', 'staff', 'frontdesk', 'technician'],
     front_desk: ['frontdesk'],
     technician: ['technician'],
 }
 
 const TAB_META: Record<string, { label: string; icon: string }> = {
     admin: { label: 'Admin Hub', icon: '🛡️' },
+    manager: { label: 'Manager Dashboard', icon: '🏢' },
     staff: { label: 'Company Staff', icon: '👥' },
     frontdesk: { label: 'Front Desk', icon: '📋' },
     technician: { label: 'Technician Portal', icon: '🔧' },
@@ -140,6 +142,7 @@ export default function MainDashboard() {
                 </nav>
             )}
             {tab === 'admin' && <AdminModule />}
+            {tab === 'manager' && <ManagerDashboardModule />}
             {tab === 'staff' && <ManagerStaffModule />}
             {tab === 'frontdesk' && <FrontDeskModule />}
             {tab === 'technician' && <TechnicianModule />}

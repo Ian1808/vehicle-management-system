@@ -95,6 +95,7 @@ type ScanLogEntry = {
 }
 
 const TABS = [
+    { key: 'overview', label: '📊 Central Overview' },
     { key: 'vehicles', label: '🚗 Vehicle Master Registry' },
     { key: 'users', label: '👥 Staff & User Management' },
     { key: 'companies', label: '🏢 Companies' },
@@ -121,7 +122,7 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 export default function AdminModule() {
-    const [activeTab, setActiveTab] = useState<'vehicles' | 'users' | 'companies' | 'banks' | 'scanlogs' | 'trash'>('vehicles')
+    const [activeTab, setActiveTab] = useState<'overview' | 'vehicles' | 'users' | 'companies' | 'banks' | 'scanlogs' | 'trash'>('overview')
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [deletedVehicles, setDeletedVehicles] = useState<Vehicle[]>([])
     const [banks, setBanks] = useState<BankRecord[]>([])
@@ -849,21 +850,51 @@ export default function AdminModule() {
         window.location.href = '/login'
     }
 
-    const totalFleetIntakeCost = vehicles.reduce((acc, v) => acc + Number(v.intake_cost || 0), 0)
-    const totalFleetRepairCost = vehicles.reduce((acc, v) => acc + Number(v.repair_cost || 0), 0)
-    const totalFleetMarketValue = vehicles.reduce((acc, v) => acc + Number(v.market_value || 0), 0)
-    const totalProjectedProfit = totalFleetMarketValue - (totalFleetIntakeCost + totalFleetRepairCost)
-
     const filteredUsers = users.filter(u => userRoleFilter === 'all' || u.role === userRoleFilter)
 
-    const summaryCards = [
-        { label: 'Total Fleet Intake Cost', value: totalFleetIntakeCost, color: 'text-rose-400' },
-        { label: 'Total Repair Outlay', value: totalFleetRepairCost, color: 'text-amber-400' },
-        { label: 'Total Market Value', value: totalFleetMarketValue, color: 'text-blue-400' },
-        { label: 'Projected Net Profit', value: totalProjectedProfit, color: 'text-emerald-400' },
-    ]
+    // ---- Central Overview computed stats ----
+    const roleCounts = {
+        admin: users.filter(u => u.role === 'admin').length,
+        manager: users.filter(u => u.role === 'manager').length,
+        front_desk: users.filter(u => u.role === 'front_desk').length,
+        technician: users.filter(u => u.role === 'technician').length,
+        third_party: users.filter(u => u.role === 'technician' && u.technician_type === 'third_party').length,
+    }
+    const fleetStats = {
+        total: vehicles.length,
+        in_repair: vehicles.filter(v => v.status === 'in_repair').length,
+        pending_photos: vehicles.filter(v => v.status === 'pending_before_photos' || v.status === 'pending_after_photos').length,
+        completed: vehicles.filter(v => v.status === 'completed').length,
+    }
+    const maxRoleCount = Math.max(1, ...Object.values(roleCounts).slice(0, 4))
+    const companyRows = companies.map(c => {
+        const cVehicles = vehicles.filter(v => v.company_id === c.id)
+        const cUsers = users.filter(u => u.company_id === c.id)
+        const intake = cVehicles.reduce((a, v) => a + Number(v.intake_cost || 0), 0)
+        const repair = cVehicles.reduce((a, v) => a + Number(v.repair_cost || 0), 0)
+        const market = cVehicles.reduce((a, v) => a + Number(v.market_value || 0), 0)
+        const manager = cUsers.find(u => u.role === 'manager')
+        return {
+            id: c.id,
+            name: c.name,
+            staff: cUsers.length,
+            technicians: cUsers.filter(u => u.role === 'technician').length,
+            thirdParty: cUsers.filter(u => u.role === 'technician' && u.technician_type === 'third_party').length,
+            vehicles: cVehicles.length,
+            inRepair: cVehicles.filter(v => v.status === 'in_repair').length,
+            pendingBefore: cVehicles.filter(v => v.status === 'pending_before_photos').length,
+            pendingAfter: cVehicles.filter(v => v.status === 'pending_after_photos').length,
+            completed: cVehicles.filter(v => v.status === 'completed').length,
+            intake,
+            repair,
+            market,
+            profit: market - (intake + repair),
+            managerName: manager?.full_name || '—',
+        }
+    })
 
     const tabCounts: Record<string, number> = {
+        overview: companies.length,
         vehicles: vehicles.length,
         users: users.length,
         companies: companies.length,
@@ -993,16 +1024,6 @@ export default function AdminModule() {
             </header>
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-                {/* Financial Fleet Summary Analytics Bar */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-                    {summaryCards.map((s) => (
-                        <Card key={s.label} isDark={isDark} className="p-5 shadow-lg">
-                            <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">{s.label}</p>
-                            <p className={`text-xl font-black ${s.color}`}>RM {s.value.toLocaleString()}</p>
-                        </Card>
-                    ))}
-                </div>
-
                 {/* Navigation Tabs */}
                 <div className={`flex flex-wrap gap-3 mb-8 border-b pb-4 ${isDark ? 'border-slate-800/40' : 'border-slate-200'}`}>
                     {TABS.map((tab) => (
@@ -1018,6 +1039,119 @@ export default function AdminModule() {
                         </button>
                     ))}
                 </div>
+
+                {/* TAB 0: CENTRAL OVERVIEW */}
+                {activeTab === 'overview' && (
+                    <div>
+                        <SectionHeading
+                            isDark={isDark}
+                            title="Central Command Overview"
+                            subtitle="Cross-company supervision — every role, every company, every vehicle under one roof."
+                        />
+
+                        {/* Operational KPI strip */}
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                            {[
+                                { label: 'Total Vehicles', value: fleetStats.total, icon: '🚗', color: 'text-blue-400' },
+                                { label: 'In Repair', value: fleetStats.in_repair, icon: '🔧', color: 'text-amber-400' },
+                                { label: 'Pending Photos', value: fleetStats.pending_photos, icon: '📷', color: 'text-rose-400' },
+                                { label: 'Completed', value: fleetStats.completed, icon: '✅', color: 'text-emerald-400' },
+                            ].map((s) => (
+                                <Card key={s.label} isDark={isDark} className="p-5 shadow-lg">
+                                    <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">{s.label}</p>
+                                    <p className={`text-xl font-black ${s.color}`}>{s.icon} {s.value}</p>
+                                </Card>
+                            ))}
+                        </div>
+
+                        {/* Quick actions + Role distribution */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                            <Card isDark={isDark} className="p-6 shadow-lg">
+                                <h3 className={`text-sm font-black tracking-tight mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>👥 Role Distribution</h3>
+                                <div className="space-y-3">
+                                    {[
+                                        { label: 'Administrators', value: roleCounts.admin, color: 'bg-purple-500' },
+                                        { label: 'Managers', value: roleCounts.manager, color: 'bg-blue-500' },
+                                        { label: 'Front Desk', value: roleCounts.front_desk, color: 'bg-emerald-500' },
+                                        { label: 'In-House Technicians', value: roleCounts.technician - roleCounts.third_party, color: 'bg-amber-500' },
+                                        { label: 'Third-Party Technicians', value: roleCounts.third_party, color: 'bg-rose-500' },
+                                    ].map((r) => (
+                                        <div key={r.label}>
+                                            <div className="flex justify-between items-baseline mb-1">
+                                                <span className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{r.label}</span>
+                                                <span className={`text-sm font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{r.value}</span>
+                                            </div>
+                                            <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                                                <div className={`h-full rounded-full ${r.color}`} style={{ width: `${(r.value / maxRoleCount) * 100}%` }} />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </Card>
+
+                            <Card isDark={isDark} className="p-6 shadow-lg flex flex-col">
+                                <h3 className={`text-sm font-black tracking-tight mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>⚡ Central Actions</h3>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => setActiveTab('users')} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
+                                        👥 Manage All Staff<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Every role, every company</span>
+                                    </button>
+                                    <button onClick={() => setActiveTab('companies')} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
+                                        🏢 Companies<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{companies.length} registered</span>
+                                    </button>
+                                    <button onClick={() => setActiveTab('vehicles')} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
+                                        🚗 Fleet Registry<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{fleetStats.total} vehicles across all companies</span>
+                                    </button>
+                                    <button onClick={() => setActiveTab('trash')} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
+                                        🗑️ Trash / Recovery<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{deletedVehicles.length} deleted vehicles</span>
+                                    </button>
+                                </div>
+                                <div className={`mt-5 pt-4 border-t text-[11px] font-semibold ${isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
+                                    Total staff across all companies: <span className={`font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{users.length}</span> · Third-party specialists: <span className={`font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{roleCounts.third_party}</span>
+                                </div>
+                            </Card>
+                        </div>
+
+                        {/* Per-company breakdown */}
+                        <h3 className={`text-sm font-black tracking-tight mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>🏢 Company Breakdown</h3>
+                        {companyRows.length === 0 ? (
+                            <EmptyState isDark={isDark} message="No companies exist yet. Create one in the Companies tab." />
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                                {companyRows.map((row) => (
+                                    <Card key={row.id} isDark={isDark} className="p-6 flex flex-col justify-between shadow-xl">
+                                        <div>
+                                            <div className="flex items-center justify-between gap-2 mb-4">
+                                                <h4 className={`text-lg font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>🏢 {row.name}</h4>
+                                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${isDark ? 'bg-purple-950 text-purple-300 border-purple-800/60' : 'bg-purple-50 text-purple-600 border-purple-200'}`}>
+                                                    {row.vehicles} vehicle{row.vehicles === 1 ? '' : 's'}
+                                                </span>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs font-semibold mb-4">
+                                                <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>👥 Staff: <span className={`font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{row.staff}</span></p>
+                                                <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>🔧 Techs: <span className={`font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{row.technicians}</span></p>
+                                                <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>🛠️ 3rd-Party: <span className={`font-black ${isDark ? 'text-rose-300' : 'text-rose-600'}`}>{row.thirdParty}</span></p>
+                                                <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>🔧 In Repair: <span className={`font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{row.inRepair}</span></p>
+                                                <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>📷 Pending Photos: <span className={`font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{row.pendingBefore + row.pendingAfter}</span></p>
+                                                <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>✅ Completed: <span className={`font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{row.completed}</span></p>
+                                            </div>
+                                            <div className={`space-y-1 text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                <p>Intake: RM {row.intake.toLocaleString()} · Market: RM {row.market.toLocaleString()}</p>
+                                                <p>Profit: <span className={`font-black ${row.profit >= 0 ? (isDark ? 'text-emerald-300' : 'text-emerald-600') : (isDark ? 'text-rose-300' : 'text-rose-600')}`}>RM {row.profit.toLocaleString()}</span></p>
+                                                <p>👑 Manager: <span className={isDark ? 'text-purple-300' : 'text-purple-600'}>{row.managerName}</span></p>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => { setActiveTab('users'); setUserRoleFilter('all') }}
+                                            className="mt-4 w-full bg-purple-600 hover:bg-purple-500 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                                        >
+                                            Manage {row.name} Staff →
+                                        </button>
+                                    </Card>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* TAB 1: VEHICLES MANAGEMENT */}
                 {activeTab === 'vehicles' && !selectedVehicle && (
