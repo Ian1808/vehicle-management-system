@@ -7,6 +7,7 @@ import { useTheme } from '@/lib/theme'
 import { PHOTO_CATEGORIES } from '@/lib/photoCategories'
 import { uniqueFileSuffix } from '@/lib/uploadUtils'
 import { getPhotoStageRules } from '@/lib/photoStages'
+import { completeAssignment, type VehicleAssignment } from '@/services/assignmentService'
 import Toast from '@/components/ui/Toast'
 import ConfirmModal from '@/components/ui/ConfirmModal'
 import PreviewModal from '@/components/ui/PreviewModal'
@@ -50,6 +51,7 @@ export default function TechnicianModule() {
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
+    const [myAssignments, setMyAssignments] = useState<VehicleAssignment[]>([])
     const [loading, setLoading] = useState(true)
 
     // Modals & UI State
@@ -70,6 +72,10 @@ export default function TechnicianModule() {
     const [currentUserEmail, setCurrentUserEmail] = useState('')
     const [settingsFullName, setSettingsFullName] = useState('')
     const [settingsUsername, setSettingsUsername] = useState('')
+
+    // Technician profile: third-party techs get the assignments view.
+    const [technicianType, setTechnicianType] = useState<string>('inhouse')
+    const [specialty, setSpecialty] = useState<string | null>(null)
 
     const supabase = createClient()
 
@@ -110,7 +116,7 @@ export default function TechnicianModule() {
 
                 const { data: userData } = await supabase
                     .from('users')
-                    .select('role, full_name, username, company_id')
+                    .select('role, full_name, username, company_id, technician_type, specialty')
                     .eq('id', user.id)
                     .single()
 
@@ -122,6 +128,29 @@ export default function TechnicianModule() {
 
                 setSettingsFullName(userData.full_name || '')
                 setSettingsUsername(userData.username || '')
+                setTechnicianType(userData.technician_type || 'inhouse')
+                setSpecialty(userData.specialty || null)
+
+                if (userData.technician_type === 'third_party' && userData.role === 'technician') {
+                    // Third-party technician: only vehicles assigned to them.
+                    const { data: myAssignments, error: assignErr } = await supabase
+                        .from('vehicle_assignments')
+                        .select('*, vehicles(plate_number, make_model_year, status, company_id)')
+                        .eq('technician_id', user.id)
+                        .order('created_at', { ascending: false })
+
+                    if (assignErr) {
+                        if (assignErr.message.includes('vehicle_assignments')) {
+                            console.warn('[TechnicianModule] vehicle_assignments table missing — assignments disabled until DB migration runs')
+                        } else {
+                            throw assignErr
+                        }
+                    } else {
+                        setMyAssignments(myAssignments || [])
+                    }
+                    setLoading(false)
+                    return
+                }
 
                 let queueQuery = supabase
                     .from('vehicles')
@@ -308,6 +337,7 @@ export default function TechnicianModule() {
                 media_type: mediaType,
                 category: categoryKey,
                 file_url: publicURLData.publicUrl,
+                uploaded_by: currentUserId,
             }])
 
             showToast('Photo uploaded successfully!', 'success')
@@ -467,6 +497,77 @@ export default function TechnicianModule() {
         }
     }
 
+    // ---- Third-party technician handlers ----
+
+    async function reloadMyAssignments() {
+        if (!currentUserId) return
+        try {
+            const { data } = await supabase
+                .from('vehicle_assignments')
+                .select('*, vehicles(plate_number, make_model_year, status, company_id)')
+                .eq('technician_id', currentUserId)
+                .order('created_at', { ascending: false })
+            if (!data) return
+            setMyAssignments(data)
+        } catch (err) {
+            showToast(err instanceof Error ? err.message : 'Failed to refresh assignments', 'error')
+        }
+    }
+
+    async function handleThirdPartyUpload(assignment: VehicleAssignment, file: File | null) {
+        if (!file || !currentUserId) return
+        const uploadKey = `3p_${assignment.id}`
+        setUploadingKey(uploadKey)
+        try {
+            const plate = assignment.vehicles?.plate_number || 'VEHICLE'
+            const slug = (specialty || 'work').replace(/[^a-z0-9]+/gi, '_').toLowerCase().replace(/^_+|_+$/g, '') || 'work'
+            const watermarkText = `CONFIDENTIAL • ${plate} • ${(specialty || 'THIRD-PARTY').toUpperCase()}`
+            const fileToUpload = await addWatermarkToFile(file, watermarkText)
+            const fileExt = fileToUpload.name.split('.').pop()?.toLowerCase() || 'jpg'
+            const path = `${assignment.vehicle_id}/photo_additional/extra_3p_${slug}_${uniqueFileSuffix()}.${fileExt}`
+
+            const { data: uploadData, error: uploadErr } = await supabase.storage
+                .from('vehicle-files')
+                .upload(path, fileToUpload, { cacheControl: '3600', upsert: true })
+            if (uploadErr) throw uploadErr
+
+            const { data: publicURLData } = supabase.storage.from('vehicle-files').getPublicUrl(uploadData.path)
+
+            await supabase.from('vehicle_media').insert([{
+                vehicle_id: assignment.vehicle_id,
+                media_type: 'photo_additional',
+                category: `extra_3p_${slug}_${uniqueFileSuffix().slice(0, 8)}`,
+                file_url: publicURLData.publicUrl,
+                uploaded_by: currentUserId,
+            }])
+
+            showToast(`Photo uploaded to additional evidence for ${plate}!`, 'success')
+        } catch (err) {
+            showToast(err instanceof Error ? err.message : 'Photo upload failed', 'error')
+        } finally {
+            setUploadingKey(null)
+        }
+    }
+
+    function requestMarkAssignmentComplete(assignment: VehicleAssignment) {
+        setConfirmModal({
+            title: 'Mark Part Complete',
+            message: `Mark your work on ${assignment.vehicles?.plate_number || 'this vehicle'} as complete? You can still upload photos afterwards.`,
+            confirmText: 'Mark Complete',
+            confirmVariant: 'success',
+            onConfirm: async () => {
+                setConfirmModal(null)
+                try {
+                    await completeAssignment(assignment.id)
+                    showToast('Part marked complete!', 'success')
+                    await reloadMyAssignments()
+                } catch (err) {
+                    showToast(err instanceof Error ? err.message : 'Failed to mark complete', 'error')
+                }
+            }
+        })
+    }
+
     const bgClass = isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'
     const innerCard = isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'
 
@@ -555,7 +656,80 @@ export default function TechnicianModule() {
             </header>
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-                {selectedVehicle ? (
+                {technicianType === 'third_party' ? (
+                    <div>
+                        <SectionHeading
+                            isDark={isDark}
+                            title={`My Third-Party Assignments${specialty ? ` — ${specialty}` : ''}`}
+                            subtitle="Only vehicles assigned to you appear here. Upload photos of your completed work into the vehicle's additional evidence, then mark your part done."
+                        />
+
+                        {myAssignments.length === 0 ? (
+                            <EmptyState isDark={isDark} message="No vehicles have been assigned to you yet. The admin, manager, or front desk will assign you once they need your specialist work." />
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                {myAssignments.map((a) => {
+                                    const done = a.status === 'completed'
+                                    const plate = a.vehicles?.plate_number || 'Unknown'
+                                    return (
+                                        <Card key={a.id} isDark={isDark} className="p-5 flex flex-col justify-between shadow-xl">
+                                            <div>
+                                                <div className="flex items-center justify-between gap-2 mb-2">
+                                                    <h3 className={`text-lg font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>{plate}</h3>
+                                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${done
+                                                        ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                                                        : 'bg-amber-950 text-amber-300 border-amber-800'
+                                                        }`}>
+                                                        {done ? '✓ Completed' : 'Pending'}
+                                                    </span>
+                                                </div>
+                                                <p className={`text-xs font-semibold mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{a.vehicles?.make_model_year || '—'}</p>
+                                                {a.specialty && (
+                                                    <span className={`inline-block mb-3 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${isDark ? 'bg-purple-950 text-purple-300 border-purple-800/60' : 'bg-purple-50 text-purple-600 border-purple-200'}`}>
+                                                        🔧 {a.specialty}
+                                                    </span>
+                                                )}
+                                                <p className={`text-[11px] mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                    {done && a.completed_at ? `Completed ${new Date(a.completed_at).toLocaleString()}` : `Assigned ${new Date(a.created_at).toLocaleString()}`}
+                                                </p>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                                <label
+                                                    htmlFor={`3p-upload-${a.id}`}
+                                                    className={`flex-1 text-center px-3 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark
+                                                        ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700'
+                                                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                                                        }`}
+                                                >
+                                                    {uploadingKey === `3p_${a.id}` ? 'Uploading…' : '📁 Upload Photo'}
+                                                </label>
+                                                <label
+                                                    htmlFor={`3p-camera-${a.id}`}
+                                                    className={`flex-1 text-center px-3 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark
+                                                        ? 'bg-blue-950 hover:bg-blue-900 text-blue-300 border-blue-800'
+                                                        : 'bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200'
+                                                        }`}
+                                                >
+                                                    📷 Take Photo
+                                                </label>
+                                                <input id={`3p-upload-${a.id}`} type="file" accept="image/*" className="hidden" onChange={(e) => handleThirdPartyUpload(a, e.target.files?.[0] || null)} />
+                                                <input id={`3p-camera-${a.id}`} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleThirdPartyUpload(a, e.target.files?.[0] || null)} />
+                                                {!done && (
+                                                    <button
+                                                        onClick={() => requestMarkAssignmentComplete(a)}
+                                                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-colors"
+                                                    >
+                                                        ✓ Mark Part Complete
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </Card>
+                                    )
+                                })}
+                            </div>
+                        )}
+                    </div>
+                ) : selectedVehicle ? (
                     <div>
                         <div className="flex justify-between items-center mb-6">
                             <button onClick={() => setSelectedVehicle(null)} className={`text-xs font-bold px-3.5 py-2 rounded-xl border cursor-pointer ${isDark ? 'border-slate-800 bg-slate-950 text-emerald-400' : 'border-slate-200 bg-white text-emerald-600'}`}>

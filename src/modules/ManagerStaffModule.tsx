@@ -30,6 +30,8 @@ type CompanyStaff = {
     is_suspended?: boolean
     last_login?: string
     created_at?: string
+    technician_type?: string | null
+    specialty?: string | null
 }
 
 export default function ManagerStaffModule() {
@@ -130,17 +132,32 @@ export default function ManagerStaffModule() {
             if (error) throw error
 
             if (data.user) {
-                await supabase
-                    .from('users')
-                    .upsert({
-                        id: data.user.id,
-                        username: cleanUsername,
-                        email: cleanEmail,
-                        full_name: payload.fullName.trim(),
-                        role: payload.role,
-                        company_id: companyId,
-                        is_suspended: false,
-                    })
+                const upsertPayload: Record<string, unknown> = {
+                    id: data.user.id,
+                    username: cleanUsername,
+                    email: cleanEmail,
+                    full_name: payload.fullName.trim(),
+                    role: payload.role,
+                    company_id: companyId,
+                    technician_type: payload.role === 'technician' ? (payload.technicianType || 'inhouse') : null,
+                    specialty: payload.role === 'technician' && payload.technicianType === 'third_party' ? (payload.specialty?.trim() || null) : null,
+                    is_suspended: false,
+                }
+
+                const { error: upsertErr } = await supabase.from('users').upsert(upsertPayload)
+                if (upsertErr) {
+                    // technician_type/specialty columns may not exist yet if the DB
+                    // migration hasn't been run — retry without them.
+                    if (upsertErr.message.includes('technician_type') || upsertErr.message.includes('specialty')) {
+                        console.warn('[ManagerStaffModule] technician_type column missing — staff created without tech profile until DB migration runs')
+                        delete upsertPayload.technician_type
+                        delete upsertPayload.specialty
+                        const retry = await supabase.from('users').upsert(upsertPayload)
+                        if (retry.error) throw retry.error
+                    } else {
+                        throw upsertErr
+                    }
+                }
             }
 
             showToast('Staff member registered to your company successfully!', 'success')
@@ -334,6 +351,11 @@ export default function ManagerStaffModule() {
                                                             <option value="front_desk">Front Desk</option>
                                                             <option value="technician">Technician</option>
                                                         </select>
+                                                        {u.role === 'technician' && (
+                                                            <p className={`text-[10px] font-bold mt-1 ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>
+                                                                {u.technician_type === 'third_party' ? `3rd-Party • ${u.specialty || 'No specialty'}` : 'In-House'}
+                                                            </p>
+                                                        )}
                                                     </td>
                                                     <td className="p-4 text-slate-400 text-[11px]">
                                                         {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never logged in'}
@@ -398,6 +420,11 @@ export default function ManagerStaffModule() {
                                                 <option value="front_desk">Front Desk</option>
                                                 <option value="technician">Technician</option>
                                             </select>
+                                            {u.role === 'technician' && (
+                                                <p className={`text-[10px] font-bold ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>
+                                                    {u.technician_type === 'third_party' ? `3rd-Party • ${u.specialty || 'No specialty'}` : 'In-House'}
+                                                </p>
+                                            )}
                                             <div className="flex flex-wrap gap-2">
                                                 <button
                                                     onClick={() => setEditingPasswordUser(u)}

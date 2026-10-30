@@ -13,6 +13,7 @@ import SectionHeading from '@/components/ui/SectionHeading'
 import EmptyState from '@/components/ui/EmptyState'
 import ResponsiveTable from '@/components/ui/ResponsiveTable'
 import StaffUserModal, { type StaffUserPayload } from '@/components/admin/StaffUserModal'
+import ThirdPartyAssignmentPanel from '@/components/assignments/ThirdPartyAssignmentPanel'
 import ChangePasswordModal from '@/components/admin/ChangePasswordModal'
 import BankModal, { type BankPayload, type BankRecord } from '@/components/admin/BankModal'
 import VehicleAuditGrid from '@/components/admin/VehicleAuditGrid'
@@ -48,6 +49,8 @@ type UserProfile = {
     created_at?: string
     company_id?: string | null
     companies?: { id: string; name: string } | null
+    technician_type?: string | null
+    specialty?: string | null
 }
 
 type CompanyRecord = {
@@ -411,17 +414,32 @@ export default function AdminModule() {
             if (error) throw error
 
             if (data.user) {
-                await supabase
-                    .from('users')
-                    .upsert({
-                        id: data.user.id,
-                        username: cleanUsername,
-                        email: cleanEmail,
-                        full_name: payload.fullName.trim(),
-                        role: payload.role,
-                        company_id: payload.companyId || null,
-                        is_suspended: false,
-                    })
+                const upsertPayload: Record<string, unknown> = {
+                    id: data.user.id,
+                    username: cleanUsername,
+                    email: cleanEmail,
+                    full_name: payload.fullName.trim(),
+                    role: payload.role,
+                    company_id: payload.companyId || null,
+                    technician_type: payload.role === 'technician' ? (payload.technicianType || 'inhouse') : null,
+                    specialty: payload.role === 'technician' && payload.technicianType === 'third_party' ? (payload.specialty?.trim() || null) : null,
+                    is_suspended: false,
+                }
+
+                const { error: upsertErr } = await supabase.from('users').upsert(upsertPayload)
+                if (upsertErr) {
+                    // technician_type/specialty columns may not exist yet if the DB
+                    // migration hasn't been run — retry without them.
+                    if (upsertErr.message.includes('technician_type') || upsertErr.message.includes('specialty')) {
+                        console.warn('[AdminModule] technician_type column missing — staff created without tech profile until DB migration runs')
+                        delete upsertPayload.technician_type
+                        delete upsertPayload.specialty
+                        const retry = await supabase.from('users').upsert(upsertPayload)
+                        if (retry.error) throw retry.error
+                    } else {
+                        throw upsertErr
+                    }
+                }
             }
 
             showToast('Staff member registered successfully!', 'success')
@@ -1154,6 +1172,17 @@ export default function AdminModule() {
                                 </div>
                             </div>
 
+                            <div className={`rounded-3xl border p-6 sm:p-8 shadow-xl ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                                <ThirdPartyAssignmentPanel
+                                    isDark={isDark}
+                                    vehicleId={selectedVehicle.id}
+                                    vehiclePlate={selectedVehicle.plate_number}
+                                    companyId={null}
+                                    isAdmin
+                                    showToast={showToast}
+                                />
+                            </div>
+
                             {adminShowBefore && (
                                 <VehicleAuditGrid
                                     isDark={isDark}
@@ -1264,6 +1293,11 @@ export default function AdminModule() {
                                                     <option value="technician">Technician</option>
                                                     <option value="bidder">Bidder</option>
                                                 </select>
+                                                {u.role === 'technician' && (
+                                                    <p className={`text-[10px] font-bold mt-1 ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>
+                                                        {u.technician_type === 'third_party' ? `3rd-Party • ${u.specialty || 'No specialty'}` : 'In-House'}
+                                                    </p>
+                                                )}
                                             </td>
                                             <td className="p-4">
                                                 {companies.length > 0 ? (
@@ -1370,6 +1404,11 @@ export default function AdminModule() {
                                             <option value="technician">Technician</option>
                                             <option value="bidder">Bidder</option>
                                         </select>
+                                        {u.role === 'technician' && (
+                                            <p className={`text-[10px] font-bold ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>
+                                                {u.technician_type === 'third_party' ? `3rd-Party • ${u.specialty || 'No specialty'}` : 'In-House'}
+                                            </p>
+                                        )}
                                         <div className="flex flex-wrap gap-2">
                                             <button
                                                 onClick={() => setEditingPasswordUser(u)}

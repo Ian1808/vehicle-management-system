@@ -10,6 +10,8 @@ export type StaffUserPayload = {
     password: string
     role: string
     companyId?: string | null
+    technicianType?: string
+    specialty?: string
 }
 
 type StaffUserModalProps = {
@@ -41,6 +43,8 @@ export default function StaffUserModal({
     const [password, setPassword] = useState('')
     const [role, setRole] = useState<string>(allowRoles.includes('front_desk') ? 'front_desk' : allowRoles[0])
     const [companyId, setCompanyId] = useState<string>(fixedCompanyId || (companies[0]?.id ?? ''))
+    const [technicianType, setTechnicianType] = useState<string>('inhouse')
+    const [specialty, setSpecialty] = useState('')
     const [saving, setSaving] = useState(false)
 
     const inputClass = `w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`
@@ -51,7 +55,7 @@ export default function StaffUserModal({
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault()
         setSaving(true)
-        const ok = await onSubmit({ fullName, username, email, password, role, companyId: fixedCompanyId || companyId || null })
+        const ok = await onSubmit({ fullName, username, email, password, role, companyId: fixedCompanyId || companyId || null, technicianType, specialty })
         setSaving(false)
         if (ok) onClose()
     }
@@ -100,6 +104,36 @@ export default function StaffUserModal({
                             ))}
                         </select>
                     </div>
+
+                    {role === 'technician' && (
+                        <div className="space-y-4">
+                            <div>
+                                <label className={labelClass}>Technician Type *</label>
+                                <select
+                                    value={technicianType}
+                                    onChange={(e) => setTechnicianType(e.target.value)}
+                                    className={`w-full border rounded-xl p-3 text-xs font-bold focus:ring-2 focus:ring-purple-500 focus:outline-none cursor-pointer capitalize ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                >
+                                    <option value="inhouse">In-House Technician (vehicle repairs)</option>
+                                    <option value="third_party">Third-Party Technician (specialist)</option>
+                                </select>
+                            </div>
+
+                            {technicianType === 'third_party' && (
+                                <div>
+                                    <label className={labelClass}>Specialty (e.g. ECU, Wheel Alignment) *</label>
+                                    <input
+                                        type="text"
+                                        required
+                                        placeholder="e.g. ECU Technician"
+                                        value={specialty}
+                                        onChange={(e) => setSpecialty(e.target.value)}
+                                        className={inputClass}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {!fixedCompanyId && companies.length > 0 && (
                         <div>

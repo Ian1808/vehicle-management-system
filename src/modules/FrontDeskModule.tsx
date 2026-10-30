@@ -12,6 +12,7 @@ import VehicleIntakeModal, { type OcrScanPayload } from '@/components/forms/Vehi
 import ConfirmModal from '@/components/ui/ConfirmModal'
 import PreviewModal from '@/components/ui/PreviewModal'
 import PhotoThumb from '@/components/ui/PhotoThumb'
+import ThirdPartyAssignmentPanel from '@/components/assignments/ThirdPartyAssignmentPanel'
 import Toast from '@/components/ui/Toast'
 import AccountSettingsModal, { type AccountSettingsPayload } from '@/components/ui/AccountSettingsModal'
 import Card from '@/components/ui/Card'
@@ -88,6 +89,7 @@ export default function FrontDeskModule() {
   const [settingsUsername, setSettingsUsername] = useState('')
   const [userRole, setUserRole] = useState<string>('')
   const [userCompanyId, setUserCompanyId] = useState<string | null>(null)
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([])
 
   const supabase = createClient()
 
@@ -125,6 +127,23 @@ export default function FrontDeskModule() {
         setUserRole(userData?.role || '')
         setUserCompanyId(userData?.company_id || null)
 
+        if (userData?.role === 'admin') {
+          const { data: companiesData, error: companiesErr } = await supabase
+            .from('companies')
+            .select('id, name')
+            .order('name', { ascending: true })
+          if (!companiesErr) setCompanies(companiesData || [])
+          else console.warn('Companies table might not exist yet:', companiesErr.message)
+        } else if (userData?.company_id) {
+          // Staff: show their own company (read-only) in the intake form.
+          const { data: myCompany } = await supabase
+            .from('companies')
+            .select('id, name')
+            .eq('id', userData.company_id)
+            .single()
+          if (myCompany) setCompanies([{ id: myCompany.id, name: myCompany.name }])
+        }
+
         const list = await fetchActiveVehicles(userData?.role === 'admin' ? null : (userData?.company_id || null))
         setVehicles(list)
       } catch (err: any) {
@@ -159,6 +178,7 @@ export default function FrontDeskModule() {
     market_value: number
     grantFile?: File | null
     ocrScan?: OcrScanPayload | null
+    companyId?: string | null
   }) {
     try {
       // Duplicate plate / chassis prevention (active vehicles only).
@@ -177,7 +197,7 @@ export default function FrontDeskModule() {
         return
       }
 
-      const newId = await insertVehicle({ ...data, created_by: currentUserId, company_id: userCompanyId })
+      const newId = await insertVehicle({ ...data, created_by: currentUserId, company_id: data.companyId ?? userCompanyId })
       if (!newId) throw new Error('Vehicle record was created but its ID could not be resolved.')
 
       // Persist the OCR scan-score record for admin monitoring (kept per vehicle).
@@ -213,6 +233,7 @@ export default function FrontDeskModule() {
             media_type: 'document',
             category: 'grant',
             file_url: publicURLData.publicUrl,
+            uploaded_by: currentUserId,
           }])
           showToast('Vehicle registered — scanned grant auto-stored as Vehicle Grant (VOC)!', 'success')
         } catch (err: unknown) {
@@ -336,6 +357,7 @@ export default function FrontDeskModule() {
         media_type: 'document',
         category: category,
         file_url: publicURLData.publicUrl,
+        uploaded_by: currentUserId,
       }])
 
       showToast('Document stored successfully!', 'success')
@@ -591,6 +613,18 @@ export default function FrontDeskModule() {
                 </div>
               </div>
 
+              {/* Third-Party Work Assignments Section */}
+              <div className={`pt-8 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                <ThirdPartyAssignmentPanel
+                  isDark={isDark}
+                  vehicleId={selectedVehicle.id}
+                  vehiclePlate={selectedVehicle.plate_number}
+                  companyId={userCompanyId}
+                  isAdmin={userRole === 'admin'}
+                  showToast={showToast}
+                />
+              </div>
+
               {/* Technician Photo Evidence Section */}
               {(showBefore || showAfter) && (
                 <div className="pt-8">
@@ -729,6 +763,8 @@ export default function FrontDeskModule() {
         isDark={isDark}
         showToast={showToast}
         userRole={userRole}
+        companies={companies}
+        fixedCompanyId={userRole === 'admin' ? null : userCompanyId}
       />
     </div>
   )

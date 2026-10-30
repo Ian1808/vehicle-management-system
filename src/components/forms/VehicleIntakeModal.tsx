@@ -297,13 +297,16 @@ type Props = {
         market_value: number
         grantFile?: File | null
         ocrScan?: OcrScanPayload | null
+        companyId?: string | null
     }) => void
     isDark: boolean
     showToast: (msg: string, type: 'success' | 'error') => void
     userRole?: string
+    companies?: { id: string; name: string }[]
+    fixedCompanyId?: string | null
 }
 
-export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, showToast, userRole }: Props) {
+export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, showToast, userRole, companies = [], fixedCompanyId }: Props) {
     const { plate, error: plateError, handlePlateChange, setPlate } = useJPJPlate()
 
     const makes = getVehicleMakes()
@@ -326,6 +329,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     const [showInspect, setShowInspect] = useState(false)
     const [grantFile, setGrantFile] = useState<File | null>(null)
     const [ocrScan, setOcrScan] = useState<OcrScanPayload | null>(null)
+    const [companyId, setCompanyId] = useState<string>(fixedCompanyId || (companies[0]?.id ?? ''))
     const fileInputRef = useRef<HTMLInputElement>(null)
     const cameraInputRef = useRef<HTMLInputElement>(null)
     const isOpenRef = useRef(isOpen)
@@ -357,6 +361,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         setOcrPass(0)
         setGrantFile(null)
         setOcrScan(null)
+        setCompanyId(fixedCompanyId || (companies[0]?.id ?? ''))
     }
 
     function handleClose() {
@@ -545,6 +550,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
             market_value: marketVal ? parseFloat(marketVal) : 0,
             grantFile,
             ocrScan,
+            companyId: fixedCompanyId || companyId || null,
         })
     }
 
@@ -708,6 +714,30 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                         <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Chassis Number (VIN) *</label>
                         <input type="text" required placeholder="e.g. PMAL123456789" value={chassis} onChange={(e) => setChassis(e.target.value.toUpperCase())} className={`w-full border rounded-xl p-3 text-xs font-medium uppercase ${inputBgClass}`} />
                     </div>
+
+                    {companies.length > 0 && (
+                        <div>
+                            <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Company *</label>
+                            {fixedCompanyId ? (
+                                <input
+                                    type="text"
+                                    value={companies.find(c => c.id === fixedCompanyId)?.name || 'My Company'}
+                                    disabled
+                                    className={`w-full border rounded-xl p-3 text-xs font-bold opacity-70 ${inputBgClass}`}
+                                />
+                            ) : (
+                                <select
+                                    value={companyId}
+                                    onChange={(e) => setCompanyId(e.target.value)}
+                                    className={`w-full border rounded-xl p-3 text-xs font-bold focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer ${inputBgClass}`}
+                                >
+                                    {companies.map((c) => (
+                                        <option key={c.id} value={c.id}>{c.name}</option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+                    )}
 
                     <div className="flex justify-end mb-1">
                         <button
