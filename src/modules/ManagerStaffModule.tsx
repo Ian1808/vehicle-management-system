@@ -34,7 +34,7 @@ type CompanyStaff = {
     specialty?: string | null
 }
 
-export default function ManagerStaffModule() {
+export default function ManagerStaffModule({ embedded = false }: { embedded?: boolean }) {
     const { isDark } = useTheme()
     const [loading, setLoading] = useState(true)
     const [toast, setToast] = useState<Toast>(null)
@@ -67,8 +67,8 @@ export default function ManagerStaffModule() {
                     .eq('id', user.id)
                     .single()
 
-                if (!userData || userData.role !== 'manager') {
-                    showToast('Access Denied: Managers only.', 'error')
+                if (!userData || (userData.role !== 'manager' && userData.role !== 'admin')) {
+                    showToast('Access Denied: Managers and Admins only.', 'error')
                     setTimeout(() => { window.location.href = '/' }, 1500)
                     return
                 }
@@ -243,7 +243,7 @@ export default function ManagerStaffModule() {
     const innerCard = isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'
 
     return (
-        <div className={`min-h-screen pb-16 relative selection:bg-purple-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
+        <div className={`min-h-screen ${embedded ? '' : 'pb-24 lg:pb-16 '}relative selection:bg-purple-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
             {toast && <Toast message={toast.message} type={toast.type} isDark={isDark} />}
 
             {confirmModal && (
@@ -364,7 +364,7 @@ export default function ManagerStaffModule() {
                                                         <div className="flex flex-wrap gap-2 justify-end">
                                                             <button
                                                                 onClick={() => setEditingPasswordUser(u)}
-                                                                className="bg-purple-950 hover:bg-purple-900 text-purple-300 px-3 py-2 rounded-xl text-xs font-bold border border-purple-800 cursor-pointer transition-colors"
+                                                                className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
                                                                 title="Change Password"
                                                             >
                                                                 🔑 Password
@@ -372,8 +372,8 @@ export default function ManagerStaffModule() {
                                                             <button
                                                                 onClick={() => handleToggleSuspendUser(u.id, Boolean(u.is_suspended), u.full_name)}
                                                                 className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${u.is_suspended
-                                                                    ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800'
-                                                                    : 'bg-amber-950 hover:bg-amber-900 text-amber-300 border-amber-800'
+                                                                    ? isDark ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                                                                    : isDark ? 'bg-amber-950 hover:bg-amber-900 text-amber-300 border-amber-800' : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
                                                                     }`}
                                                                 title={u.is_suspended ? 'Reactivate Account' : 'Suspend Account'}
                                                             >
@@ -381,7 +381,7 @@ export default function ManagerStaffModule() {
                                                             </button>
                                                             <button
                                                                 onClick={() => handleDeleteUser(u.id, u.full_name)}
-                                                                className="bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer transition-colors"
+                                                                className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
                                                                 title="Remove Account"
                                                             >
                                                                 🗑️
@@ -403,8 +403,8 @@ export default function ManagerStaffModule() {
                                                     <p className={`text-[11px] font-mono truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>@{u.username} {u.email ? `• ${u.email}` : ''}</p>
                                                 </div>
                                                 <span className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${u.is_suspended
-                                                    ? 'bg-rose-950 text-rose-300 border-rose-800'
-                                                    : 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                                                    ? isDark ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-rose-50 text-rose-700 border-rose-200'
+                                                    : isDark ? 'bg-emerald-950 text-emerald-300 border-emerald-800' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                                     }`}>
                                                     {u.is_suspended ? 'Suspended' : 'Active'}
                                                 </span>
@@ -428,7 +428,7 @@ export default function ManagerStaffModule() {
                                             <div className="flex flex-wrap gap-2">
                                                 <button
                                                     onClick={() => setEditingPasswordUser(u)}
-                                                    className="flex-1 bg-purple-950 hover:bg-purple-900 text-purple-300 px-3 py-2 rounded-xl text-xs font-bold border border-purple-800 cursor-pointer transition-colors"
+                                                    className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
                                                     title="Change Password"
                                                 >
                                                     🔑 Password
@@ -436,8 +436,8 @@ export default function ManagerStaffModule() {
                                                 <button
                                                     onClick={() => handleToggleSuspendUser(u.id, Boolean(u.is_suspended), u.full_name)}
                                                     className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${u.is_suspended
-                                                        ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800'
-                                                        : 'bg-amber-950 hover:bg-amber-900 text-amber-300 border-amber-800'
+                                                        ? isDark ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                                                        : isDark ? 'bg-amber-950 hover:bg-amber-900 text-amber-300 border-amber-800' : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
                                                         }`}
                                                     title={u.is_suspended ? 'Reactivate Account' : 'Suspend Account'}
                                                 >
@@ -445,7 +445,7 @@ export default function ManagerStaffModule() {
                                                 </button>
                                                 <button
                                                     onClick={() => handleDeleteUser(u.id, u.full_name)}
-                                                    className="flex-1 bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer transition-colors"
+                                                    className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
                                                     title="Remove Account"
                                                 >
                                                     🗑️

@@ -567,7 +567,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
             <div className={`border rounded-3xl shadow-2xl max-w-lg w-full p-8 max-h-[90vh] overflow-y-auto ${bgClass}`}>
                 <div className="flex justify-between items-center mb-6">
                     <div>
-                        <h3 className="text-xl font-extrabold">New Vehicle Intake</h3>
+                        <h3 className="text-xl font-extrabold">Add Vehicle</h3>
                     </div>
                     <button onClick={handleClose} className={`rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg cursor-pointer ${closeBtnClass}`}>&times;</button>
                 </div>

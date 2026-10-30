@@ -6,7 +6,6 @@ import { useTheme } from '@/lib/theme'
 import Toast from '@/components/ui/Toast'
 import ConfirmModal from '@/components/ui/ConfirmModal'
 import PreviewModal from '@/components/ui/PreviewModal'
-import AccountSettingsModal, { type AccountSettingsPayload } from '@/components/ui/AccountSettingsModal'
 import Card from '@/components/ui/Card'
 import StatusBadge from '@/components/ui/StatusBadge'
 import SectionHeading from '@/components/ui/SectionHeading'
@@ -15,12 +14,18 @@ import ResponsiveTable from '@/components/ui/ResponsiveTable'
 import StaffUserModal, { type StaffUserPayload } from '@/components/admin/StaffUserModal'
 import ThirdPartyAssignmentPanel from '@/components/assignments/ThirdPartyAssignmentPanel'
 import ChangePasswordModal from '@/components/admin/ChangePasswordModal'
-import BankModal, { type BankPayload, type BankRecord } from '@/components/admin/BankModal'
+import { type BankRecord } from '@/components/admin/BankModal'
+import { type InsurancePanelRecord } from '@/components/admin/InsurancePanelModal'
 import VehicleAuditGrid from '@/components/admin/VehicleAuditGrid'
 import AdditionalPhotosGrid from '@/components/admin/AdditionalPhotosGrid'
 import VehicleEditModal, { type VehicleEditPayload } from '@/components/admin/VehicleEditModal'
 import { getPhotoStageRules } from '@/lib/photoStages'
 import { PHOTO_CATEGORIES } from '@/lib/photoCategories'
+import ManagerDashboardModule from '@/modules/ManagerDashboardModule'
+import ManagerPanelBanksModule from '@/modules/ManagerPanelBanksModule'
+import ManagerStaffModule from '@/modules/ManagerStaffModule'
+import FrontDeskModule from '@/modules/FrontDeskModule'
+import TechnicianModule from '@/modules/TechnicianModule'
 
 type Vehicle = {
     id: string
@@ -58,6 +63,8 @@ type CompanyRecord = {
     name: string
     created_at?: string
 }
+
+type AdminBankRow = BankRecord & { companies?: { name: string } | null }
 
 type MediaItem = {
     id: string
@@ -99,17 +106,29 @@ const TABS = [
     { key: 'vehicles', label: '🚗 Vehicle Master Registry' },
     { key: 'users', label: '👥 Staff & User Management' },
     { key: 'companies', label: '🏢 Companies' },
-    { key: 'banks', label: '🏦 Panel Bank Criteria' },
+    { key: 'banks', label: '🏦 Banks & Insurance' },
     { key: 'scanlogs', label: '🔍 OCR Scan Scores' },
     { key: 'trash', label: '🗑️ Trash / Recovery' },
 ] as const
+
+// Admin manages every module from within this page — no separate module nav bar.
+const ADMIN_MODULES = [
+    { key: 'admin', label: '🛡️ Admin Hub' },
+    { key: 'manager', label: '🏢 Manager Dashboard' },
+    { key: 'panels', label: '🏦 Panel Banks & Insurance' },
+    { key: 'staff', label: '👥 Company Staff' },
+    { key: 'frontdesk', label: '📋 Front Desk' },
+    { key: 'technician', label: '🔧 Technician Portal' },
+] as const
+
+type AdminModuleKey = typeof ADMIN_MODULES[number]['key']
 
 const ROLE_FILTERS = ['all', 'admin', 'manager', 'front_desk', 'technician'] as const
 
 const DOCUMENT_CATEGORIES = ['grant', 'jpj', 'insurance', 'ber'] as const
 
 function adminDocumentLabel(category: string): string {
-    return category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
+    return category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance' : 'BER Form'
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -122,10 +141,16 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 export default function AdminModule() {
+    const [moduleView, setModuleView] = useState<AdminModuleKey>(() => {
+        if (typeof window === 'undefined') return 'admin'
+        const requested = new URLSearchParams(window.location.search).get('tab')
+        return ADMIN_MODULES.some((m) => m.key === requested) ? (requested as AdminModuleKey) : 'admin'
+    })
     const [activeTab, setActiveTab] = useState<'overview' | 'vehicles' | 'users' | 'companies' | 'banks' | 'scanlogs' | 'trash'>('overview')
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [deletedVehicles, setDeletedVehicles] = useState<Vehicle[]>([])
-    const [banks, setBanks] = useState<BankRecord[]>([])
+    const [banks, setBanks] = useState<AdminBankRow[]>([])
+    const [insurancePanels, setInsurancePanels] = useState<InsurancePanelRecord[]>([])
     const [users, setUsers] = useState<UserProfile[]>([])
     const [companies, setCompanies] = useState<CompanyRecord[]>([])
     const [scanLogs, setScanLogs] = useState<ScanLogEntry[]>([])
@@ -137,9 +162,6 @@ export default function AdminModule() {
     const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null)
     const [previewMedia, setPreviewMedia] = useState<PreviewMedia | null>(null)
 
-    // New Bank Modal State
-    const [showBankModal, setShowBankModal] = useState(false)
-    const [editingBank, setEditingBank] = useState<BankRecord | null>(null)
     const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null)
 
     // New Staff User Modal State
@@ -151,14 +173,7 @@ export default function AdminModule() {
     const [editingPasswordUser, setEditingPasswordUser] = useState<UserProfile | null>(null)
 
     // Theme State ('dark' | 'light') — shared across all pages via useTheme()
-    const { theme, setTheme, isDark } = useTheme()
-
-    // Settings Modal State
-    const [showSettingsModal, setShowSettingsModal] = useState(false)
-    const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-    const [currentUserEmail, setCurrentUserEmail] = useState<string>('')
-    const [settingsFullName, setSettingsFullName] = useState('')
-    const [settingsUsername, setSettingsUsername] = useState('')
+    const { isDark } = useTheme()
 
     const supabase = createClient()
 
@@ -175,9 +190,6 @@ export default function AdminModule() {
                 return
             }
 
-            setCurrentUserId(user.id)
-            setCurrentUserEmail(user.email || '')
-
             const { data: userData, error: userError } = await supabase
                 .from('users')
                 .select('role, full_name, username')
@@ -190,9 +202,6 @@ export default function AdminModule() {
                 return
             }
 
-            setSettingsFullName(userData.full_name || '')
-            setSettingsUsername(userData.username || '')
-
             fetchAllData()
         }
         checkAdminAccess()
@@ -204,6 +213,7 @@ export default function AdminModule() {
         await Promise.all([
             fetchDeletedVehicles(),
             fetchBanks(),
+            fetchInsurancePanels(),
             fetchUsers(),
             fetchCompanies()
         ])
@@ -250,13 +260,33 @@ export default function AdminModule() {
     async function fetchBanks() {
         const { data, error } = await supabase
             .from('banks')
-            .select('*')
+            .select('*, companies(name)')
             .order('bank_name', { ascending: true })
 
         if (error) {
             console.warn('Banks table might not exist yet:', error.message)
+            const fallback = await supabase
+                .from('banks')
+                .select('*')
+                .order('bank_name', { ascending: true })
+            if (fallback.error) showToast(fallback.error.message, 'error')
+            else setBanks(fallback.data || [])
         } else {
             setBanks(data || [])
+        }
+    }
+
+    async function fetchInsurancePanels() {
+        const { data, error } = await supabase
+            .from('insurance_panels')
+            .select('*, companies(name)')
+            .order('name', { ascending: true })
+
+        if (error) {
+            console.warn('insurance_panels table might not exist yet:', error.message)
+            setInsurancePanels([])
+        } else {
+            setInsurancePanels(data || [])
         }
     }
 
@@ -341,56 +371,6 @@ export default function AdminModule() {
     const selectVehicle = (v: Vehicle) => {
         setSelectedVehicle(v)
         fetchMedia(v.id)
-    }
-
-    async function handleSaveBank(payload: BankPayload): Promise<boolean> {
-        if (!payload.bankName.trim()) return false
-
-        try {
-            if (editingBank) {
-                const { error } = await supabase
-                    .from('banks')
-                    .update({
-                        bank_name: payload.bankName.trim(),
-                        accepts_ber: payload.acceptsBer,
-                        accepts_refinance: payload.acceptsRefinance,
-                        notes: payload.notes.trim(),
-                        updated_at: new Date().toISOString(),
-                    })
-                    .eq('id', editingBank.id)
-
-                if (error) throw error
-                showToast('Bank criteria updated successfully!', 'success')
-            } else {
-                const { error } = await supabase
-                    .from('banks')
-                    .insert([{
-                        bank_name: payload.bankName.trim(),
-                        accepts_ber: payload.acceptsBer,
-                        accepts_refinance: payload.acceptsRefinance,
-                        notes: payload.notes.trim(),
-                    }])
-
-                if (error) throw error
-                showToast('New bank added successfully!', 'success')
-            }
-
-            fetchBanks()
-            return true
-        } catch (err: any) {
-            showToast(err.message || 'Failed to save bank record.', 'error')
-            return false
-        }
-    }
-
-    function openEditBankModal(b: BankRecord) {
-        setEditingBank(b)
-        setShowBankModal(true)
-    }
-
-    function openNewBankModal() {
-        setEditingBank(null)
-        setShowBankModal(true)
     }
 
     async function handleCreateStaffUser(payload: StaffUserPayload): Promise<boolean> {
@@ -550,57 +530,6 @@ export default function AdminModule() {
                 }
             }
         })
-    }
-
-    async function handleSettingsSave(payload: AccountSettingsPayload): Promise<{ ok: boolean; error?: string }> {
-        if (!currentUserId) return { ok: false, error: 'Not authenticated.' }
-
-        try {
-            if (!payload.username.trim()) return { ok: false, error: 'Username cannot be empty.' }
-
-            const { data: existingUsername } = await supabase
-                .from('users')
-                .select('id')
-                .eq('username', payload.username)
-                .neq('id', currentUserId)
-                .maybeSingle()
-
-            if (existingUsername) return { ok: false, error: 'That username is already taken.' }
-
-            const { error: profileError } = await supabase
-                .from('users')
-                .update({ full_name: payload.fullName, username: payload.username })
-                .eq('id', currentUserId)
-
-            if (profileError) throw profileError
-
-            if (payload.newPassword.trim()) {
-                if (!payload.oldPassword.trim()) {
-                    return { ok: false, error: 'Please enter your current (old) password to change passwords.' }
-                }
-
-                const { error: signInError } = await supabase.auth.signInWithPassword({
-                    email: currentUserEmail,
-                    password: payload.oldPassword.trim(),
-                })
-
-                if (signInError) {
-                    return { ok: false, error: 'Incorrect old password provided.' }
-                }
-
-                const { error: passwordError } = await supabase.auth.updateUser({
-                    password: payload.newPassword.trim(),
-                })
-                if (passwordError) throw passwordError
-            }
-
-            setSettingsFullName(payload.fullName)
-            setSettingsUsername(payload.username)
-            showToast('Admin settings & security updated successfully!', 'success')
-            return { ok: true }
-        } catch (err: any) {
-            return { ok: false, error: err.message || 'Failed to update settings.' }
-        }
     }
 
     async function handleUpdateUserRole(userId: string, newRole: string) {
@@ -831,25 +760,6 @@ export default function AdminModule() {
         setPreviewMedia({ items, index: Math.max(0, items.findIndex(it => it.url === clickedUrl)) })
     }
 
-    function requestLogout() {
-        setConfirmModal({
-            title: 'Confirm Sign Out',
-            message: 'Are you sure you want to sign out of the Admin Hub?',
-            confirmText: 'Sign Out',
-            confirmVariant: 'danger',
-            onConfirm: () => executeLogout(),
-        })
-    }
-
-    async function executeLogout() {
-        setConfirmModal(null)
-        await supabase.auth.signOut()
-        document.cookie.split(";").forEach((c) => {
-            document.cookie = c.replace(/^ +/, "").replace(/=.*/, `=;expires=${new Date(0).toUTCString()};path=/`);
-        });
-        window.location.href = '/login'
-    }
-
     const filteredUsers = users.filter(u => userRoleFilter === 'all' || u.role === userRoleFilter)
 
     // ---- Central Overview computed stats ----
@@ -908,8 +818,16 @@ export default function AdminModule() {
     const adminShowAfter = adminStage?.after !== 'hidden'
     const adminShowAdditional = adminStage?.additional !== 'hidden'
 
+    function handleModuleChange(next: AdminModuleKey) {
+        setModuleView(next)
+        const url = new URL(window.location.href)
+        if (next === 'admin') url.searchParams.delete('tab')
+        else url.searchParams.set('tab', next)
+        window.history.replaceState(null, '', url.pathname + url.search)
+    }
+
     return (
-        <div className={`min-h-screen pb-16 relative selection:bg-purple-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
+        <div className={`min-h-screen relative selection:bg-purple-500 selection:text-white ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
             {toast && <Toast message={toast.message} type={toast.type} isDark={isDark} />}
 
             {confirmModal && (
@@ -947,16 +865,6 @@ export default function AdminModule() {
                 />
             )}
 
-            {/* Add / Edit Bank Modal */}
-            {showBankModal && (
-                <BankModal
-                    isDark={isDark}
-                    editingBank={editingBank}
-                    onSubmit={handleSaveBank}
-                    onClose={() => { setShowBankModal(false); setEditingBank(null); }}
-                />
-            )}
-
             {/* Edit Vehicle Modal */}
             {editingVehicle && (
                 <VehicleEditModal
@@ -968,76 +876,43 @@ export default function AdminModule() {
                 />
             )}
 
-            {/* Settings Modal */}
-            {showSettingsModal && (
-                <AccountSettingsModal
-                    isDark={isDark}
-                    theme={theme}
-                    setTheme={setTheme}
-                    title="Admin Account Settings"
-                    subtitle="Manage appearance, profile, and master credentials."
-                    email={currentUserEmail}
-                    username={settingsUsername}
-                    fullName={settingsFullName}
-                    accent="purple"
-                    showLandingModule
-                    onClose={() => setShowSettingsModal(false)}
-                    onSave={handleSettingsSave}
-                />
-            )}
-
-            {/* Header */}
-            <header className={`border-b sticky top-0 z-20 shadow-lg backdrop-blur-md ${isDark ? 'bg-slate-950/90 border-slate-800 text-white' : 'bg-white/90 border-slate-200 text-slate-900'}`}>
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-2xl bg-purple-600/20 border border-purple-500/40 flex items-center justify-center text-purple-400 font-black text-base">
-                            👑
-                        </div>
-                        <div>
-                            <h1 className="text-base font-extrabold tracking-tight">System Admin Control Hub</h1>
-                            <p className={`text-[11px] font-medium hidden sm:block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Master Supervision, Financials & Staff Governance</p>
-                        </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                        <button
-                            onClick={() => setTheme(isDark ? 'light' : 'dark')}
-                            className={`p-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-amber-600 border-slate-200'}`}
-                            title="Toggle Theme"
-                        >
-                            {isDark ? '☀️ Light' : '🌙 Dark'}
-                        </button>
-                        <button
-                            onClick={() => setShowSettingsModal(true)}
-                            className={`font-semibold px-3.5 py-2 rounded-xl text-xs border transition-all cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
-                        >
-                            ⚙️ Settings
-                        </button>
-                        <button
-                            onClick={requestLogout}
-                            className="bg-rose-600 hover:bg-rose-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs shadow transition-all cursor-pointer"
-                        >
-                            Sign Out
-                        </button>
-                    </div>
-                </div>
-            </header>
-
             <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-                {/* Navigation Tabs */}
-                <div className={`flex flex-wrap gap-3 mb-8 border-b pb-4 ${isDark ? 'border-slate-800/40' : 'border-slate-200'}`}>
-                    {TABS.map((tab) => (
-                        <button
-                            key={tab.key}
-                            onClick={() => { setActiveTab(tab.key); setSelectedVehicle(null); }}
-                            className={`px-5 py-2.5 rounded-2xl text-xs font-extrabold transition-all cursor-pointer border ${activeTab === tab.key
-                                    ? 'bg-purple-600 text-white border-purple-500 shadow-md'
-                                    : isDark ? 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                                }`}
-                        >
-                            {tab.label} ({tabCounts[tab.key]})
-                        </button>
-                    ))}
+                {/* Module selector — admin manages all modules from within this page */}
+                <div className="mb-6 flex flex-col sm:flex-row sm:items-center gap-2">
+                    <span className={`text-[11px] font-extrabold uppercase tracking-wider shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Module:</span>
+                    <select
+                        value={moduleView}
+                        onChange={(e) => handleModuleChange(e.target.value as AdminModuleKey)}
+                        className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl text-xs font-extrabold border cursor-pointer ${isDark ? 'bg-slate-950 text-white border-slate-700' : 'bg-white text-slate-800 border-slate-200 shadow-sm'}`}
+                    >
+                        {ADMIN_MODULES.map((m) => (
+                            <option key={m.key} value={m.key}>{m.label}</option>
+                        ))}
+                    </select>
+                </div>
+
+                {moduleView !== 'admin' ? (
+                    <div>
+                        {moduleView === 'manager' && <ManagerDashboardModule embedded />}
+                        {moduleView === 'panels' && <ManagerPanelBanksModule embedded />}
+                        {moduleView === 'staff' && <ManagerStaffModule embedded />}
+                        {moduleView === 'frontdesk' && <FrontDeskModule embedded />}
+                        {moduleView === 'technician' && <TechnicianModule embedded />}
+                    </div>
+                ) : (
+                    <>
+                {/* Section selector */}
+                <div className="mb-6 flex items-center gap-2">
+                    <span className={`text-[11px] font-extrabold uppercase tracking-wider shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Section:</span>
+                    <select
+                        value={activeTab}
+                        onChange={(e) => { setActiveTab(e.target.value as 'overview' | 'vehicles' | 'users' | 'companies' | 'banks' | 'scanlogs' | 'trash'); setSelectedVehicle(null); }}
+                        className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl text-xs font-extrabold border cursor-pointer ${isDark ? 'bg-slate-950 text-white border-slate-700' : 'bg-white text-slate-800 border-slate-200 shadow-sm'}`}
+                    >
+                        {TABS.map((tab) => (
+                            <option key={tab.key} value={tab.key}>{tab.label} ({tabCounts[tab.key]})</option>
+                        ))}
+                    </select>
                 </div>
 
                 {/* TAB 0: CENTRAL OVERVIEW */}
@@ -1209,7 +1084,7 @@ export default function AdminModule() {
                                             <button
                                                 type="button"
                                                 onClick={(e) => { e.stopPropagation(); setEditingVehicle(v); }}
-                                                className="bg-slate-800 hover:bg-slate-700 text-amber-300 px-3 py-2.5 rounded-xl text-xs font-bold border border-slate-700 cursor-pointer"
+                                                className={`px-3 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-amber-700 border-slate-200'}`}
                                                 title="Edit Vehicle"
                                             >
                                                 ✏️
@@ -1217,7 +1092,7 @@ export default function AdminModule() {
                                             <button
                                                 type="button"
                                                 onClick={(e) => { e.stopPropagation(); handleSoftDelete(v.id, v.plate_number); }}
-                                                className="bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2.5 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer"
+                                                className={`px-3 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
                                                 title="Move to Trash"
                                             >
                                                 🗑️
@@ -1458,7 +1333,7 @@ export default function AdminModule() {
                                                 <div className="flex flex-wrap gap-2 justify-end">
                                                     <button
                                                         onClick={() => setEditingPasswordUser(u)}
-                                                        className="bg-purple-950 hover:bg-purple-900 text-purple-300 px-3 py-2 rounded-xl text-xs font-bold border border-purple-800 cursor-pointer transition-colors"
+                                                        className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
                                                         title="Change Password"
                                                     >
                                                         🔑 Password
@@ -1466,8 +1341,8 @@ export default function AdminModule() {
                                                     <button
                                                         onClick={() => handleToggleSuspendUser(u.id, Boolean(u.is_suspended), u.full_name)}
                                                         className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${u.is_suspended
-                                                                ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800'
-                                                                : 'bg-amber-950 hover:bg-amber-900 text-amber-300 border-amber-800'
+                                                                ? isDark ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                                                                : isDark ? 'bg-amber-950 hover:bg-amber-900 text-amber-300 border-amber-800' : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
                                                             }`}
                                                         title={u.is_suspended ? 'Reactivate Account' : 'Suspend Account'}
                                                     >
@@ -1475,7 +1350,7 @@ export default function AdminModule() {
                                                     </button>
                                                     <button
                                                         onClick={() => handleDeleteUser(u.id, u.full_name)}
-                                                        className="bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer transition-colors"
+                                                        className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
                                                         title="Remove Account"
                                                     >
                                                         🗑️
@@ -1546,7 +1421,7 @@ export default function AdminModule() {
                                         <div className="flex flex-wrap gap-2">
                                             <button
                                                 onClick={() => setEditingPasswordUser(u)}
-                                                className="flex-1 bg-purple-950 hover:bg-purple-900 text-purple-300 px-3 py-2 rounded-xl text-xs font-bold border border-purple-800 cursor-pointer transition-colors"
+                                                className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
                                                 title="Change Password"
                                             >
                                                 🔑 Password
@@ -1554,8 +1429,8 @@ export default function AdminModule() {
                                             <button
                                                 onClick={() => handleToggleSuspendUser(u.id, Boolean(u.is_suspended), u.full_name)}
                                                 className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${u.is_suspended
-                                                        ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800'
-                                                        : 'bg-amber-950 hover:bg-amber-900 text-amber-300 border-amber-800'
+                                                        ? isDark ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                                                        : isDark ? 'bg-amber-950 hover:bg-amber-900 text-amber-300 border-amber-800' : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
                                                     }`}
                                                 title={u.is_suspended ? 'Reactivate Account' : 'Suspend Account'}
                                             >
@@ -1563,7 +1438,7 @@ export default function AdminModule() {
                                             </button>
                                             <button
                                                 onClick={() => handleDeleteUser(u.id, u.full_name)}
-                                                className="bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer transition-colors"
+                                                className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
                                                 title="Remove Account"
                                             >
                                                 🗑️
@@ -1637,50 +1512,63 @@ export default function AdminModule() {
                     </div>
                 )}
 
-                {/* TAB 3: PANEL BANK CRITERIA */}
+                {/* TAB 3: BANKS & INSURANCE — all companies, read-only */}
                 {activeTab === 'banks' && (
                     <div>
                         <SectionHeading
                             isDark={isDark}
-                            title="Panel Bank Criteria Management"
-                            subtitle="Configure which banks accept BER (Beyond Economic Repair) and Refinance cases."
-                            right={
-                                <button
-                                    onClick={openNewBankModal}
-                                    className="bg-purple-600 hover:bg-purple-500 text-white px-5 py-2.5 rounded-2xl text-xs font-bold shadow-lg transition-all cursor-pointer"
-                                >
-                                    + Add New Bank
-                                </button>
-                            }
+                            title="Panel Banks & Insurance — All Companies"
+                            subtitle="Each company's manager decides their own panel banks and insurance panels. This view is read-only: every company's configuration at a glance."
                         />
 
+                        <h3 className={`text-sm font-black tracking-tight mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>🏦 Panel Banks ({banks.length})</h3>
                         {banks.length === 0 ? (
-                            <EmptyState isDark={isDark} message='No panel banks configured yet. Click "+ Add New Bank" to get started.' />
+                            <EmptyState isDark={isDark} message='No panel banks configured by any company yet. Managers can add banks from their own dashboard.' />
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-10">
+                                {banks.map((b) => (
+                                    <Card key={b.id} isDark={isDark} className="p-6 shadow-xl">
+                                        <div className="flex justify-between items-start gap-2 mb-3">
+                                            <h3 className={`text-lg font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>{b.bank_name}</h3>
+                                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border truncate max-w-[45%] ${isDark ? 'bg-purple-600/15 text-purple-300 border-purple-700/40' : 'bg-purple-50 text-purple-700 border-purple-200'}`}>
+                                                🏢 {(b as AdminBankRow).companies?.name || 'Unassigned'}
+                                            </span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 mb-4">
+                                            <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${b.accepts_ber ? 'bg-emerald-950 text-emerald-300 border-emerald-800/60' : isDark ? 'bg-slate-900 text-slate-500 border-slate-800' : 'bg-slate-100 text-slate-400 border-slate-200'}`}>
+                                                {b.accepts_ber ? '✓ Accepts BER' : '✗ No BER'}
+                                            </span>
+                                            <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${b.accepts_refinance ? 'bg-blue-950 text-blue-300 border-blue-800/60' : isDark ? 'bg-slate-900 text-slate-500 border-slate-800' : 'bg-slate-100 text-slate-400 border-slate-200'}`}>
+                                                {b.accepts_refinance ? '✓ Accepts Refinance' : '✗ No Refinance'}
+                                            </span>
+                                        </div>
+                                        <p className={`text-xs font-medium p-3 rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                                            {b.notes || 'No specific notes recorded.'}
+                                        </p>
+                                    </Card>
+                                ))}
+                            </div>
+                        )}
+
+                        <h3 className={`text-sm font-black tracking-tight mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>🛡️ Insurance Panels ({insurancePanels.length})</h3>
+                        {insurancePanels.length === 0 ? (
+                            <EmptyState isDark={isDark} message='No insurance panels configured by any company yet. Managers can add panels from their own dashboard.' />
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                                {banks.map((b) => (
-                                    <Card key={b.id} isDark={isDark} className="p-6 flex flex-col justify-between shadow-xl">
-                                        <div>
-                                            <h3 className={`text-lg font-black tracking-tight mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>{b.bank_name}</h3>
-                                            <div className="flex flex-wrap gap-2 mb-4">
-                                                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${b.accepts_ber ? 'bg-emerald-950 text-emerald-300 border-emerald-800/60' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>
-                                                    {b.accepts_ber ? '✓ Accepts BER' : '✗ No BER'}
-                                                </span>
-                                                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${b.accepts_refinance ? 'bg-blue-950 text-blue-300 border-blue-800/60' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>
-                                                    {b.accepts_refinance ? '✓ Accepts Refinance' : '✗ No Refinance'}
-                                                </span>
+                                {insurancePanels.map((p) => (
+                                    <Card key={p.id} isDark={isDark} className="p-6 shadow-xl">
+                                        <div className="flex justify-between items-start gap-2 mb-3">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-lg">🛡️</span>
+                                                <h3 className={`text-lg font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>{p.name}</h3>
                                             </div>
-                                            <p className={`text-xs font-medium p-3 rounded-2xl border mb-6 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
-                                                {b.notes || 'No specific notes recorded.'}
-                                            </p>
+                                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border truncate max-w-[45%] ${isDark ? 'bg-purple-600/15 text-purple-300 border-purple-700/40' : 'bg-purple-50 text-purple-700 border-purple-200'}`}>
+                                                🏢 {p.companies?.name || 'Unassigned'}
+                                            </span>
                                         </div>
-
-                                        <button
-                                            onClick={() => openEditBankModal(b)}
-                                            className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-600 border-slate-200'}`}
-                                        >
-                                            Edit Bank Criteria &rarr;
-                                        </button>
+                                        <p className={`text-xs font-medium p-3 rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                                            {p.notes || 'No specific notes recorded.'}
+                                        </p>
                                     </Card>
                                 ))}
                             </div>
@@ -1785,7 +1673,7 @@ export default function AdminModule() {
                                             <button
                                                 type="button"
                                                 onClick={() => requestPermanentDelete(v.id, v.plate_number)}
-                                                className="bg-rose-950 hover:bg-rose-900 text-rose-300 px-3 py-2.5 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer"
+                                                className={`px-3 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
                                                 title="Permanently Delete (cannot be undone)"
                                             >
                                                 🗑️
@@ -1796,6 +1684,8 @@ export default function AdminModule() {
                             </div>
                         )}
                     </div>
+                )}
+                    </>
                 )}
             </main>
         </div>

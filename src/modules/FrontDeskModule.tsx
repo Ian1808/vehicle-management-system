@@ -14,7 +14,6 @@ import PreviewModal from '@/components/ui/PreviewModal'
 import PhotoThumb from '@/components/ui/PhotoThumb'
 import ThirdPartyAssignmentPanel from '@/components/assignments/ThirdPartyAssignmentPanel'
 import Toast from '@/components/ui/Toast'
-import AccountSettingsModal, { type AccountSettingsPayload } from '@/components/ui/AccountSettingsModal'
 import Card from '@/components/ui/Card'
 import StatusBadge from '@/components/ui/StatusBadge'
 import SectionHeading from '@/components/ui/SectionHeading'
@@ -55,14 +54,14 @@ type PreviewState = { items: { url: string; title: string }[]; index: number } |
 const DOCUMENT_CATEGORIES = ['grant', 'jpj', 'insurance', 'ber'] as const
 
 function documentLabel(category: string): string {
-  return category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance & Roadtax' : 'BER Form'
+  return category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance' : 'BER Form'
 }
 
 function additionalLabel(category: string): string {
   return category.replace(/^extra_/, '').replace(/_[a-f0-9]{8}$/i, '').replace(/_/g, ' ')
 }
 
-export default function FrontDeskModule() {
+export default function FrontDeskModule({ embedded = false }: { embedded?: boolean }) {
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
@@ -75,18 +74,14 @@ export default function FrontDeskModule() {
 
   // Modals & UI State
   const [showModal, setShowModal] = useState(false)
-  const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [uploadingCategory, setUploadingCategory] = useState<string | null>(null)
   const [toast, setToast] = useState<ToastState>(null)
   const [confirmModal, setConfirmModal] = useState<ConfirmState>(null)
   const [previewMedia, setPreviewMedia] = useState<PreviewState>(null)
-  const { theme, setTheme, isDark } = useTheme()
+  const { isDark } = useTheme()
 
-  // User Settings State
+  // User State
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-  const [currentUserEmail, setCurrentUserEmail] = useState<string>('')
-  const [settingsFullName, setSettingsFullName] = useState('')
-  const [settingsUsername, setSettingsUsername] = useState('')
   const [userRole, setUserRole] = useState<string>('')
   const [userCompanyId, setUserCompanyId] = useState<string | null>(null)
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([])
@@ -108,7 +103,6 @@ export default function FrontDeskModule() {
         }
 
         setCurrentUserId(user.id)
-        setCurrentUserEmail(user.email || '')
 
         const { data: userData } = await supabase
           .from('users')
@@ -122,8 +116,6 @@ export default function FrontDeskModule() {
           return
         }
 
-        setSettingsFullName(userData?.full_name || '')
-        setSettingsUsername(userData?.username || '')
         setUserRole(userData?.role || '')
         setUserCompanyId(userData?.company_id || null)
 
@@ -146,6 +138,18 @@ export default function FrontDeskModule() {
 
         const list = await fetchActiveVehicles(userData?.role === 'admin' ? null : (userData?.company_id || null))
         setVehicles(list)
+
+        // Deep-link: open a specific vehicle directly (?tab=frontdesk&vehicle=<id>)
+        const params = new URLSearchParams(window.location.search)
+        const vehicleParam = params.get('vehicle')
+        if (vehicleParam && list) {
+          const target = list.find(v => v.id === vehicleParam)
+          if (target) setSelectedVehicle(target)
+          // Consume the param so it doesn't re-open on later visits
+          const url = new URL(window.location.href)
+          url.searchParams.delete('vehicle')
+          window.history.replaceState(null, '', url.pathname + url.search)
+        }
       } catch (err: any) {
         showToast(err.message || 'Initialization failed', 'error')
       } finally {
@@ -240,7 +244,7 @@ export default function FrontDeskModule() {
           showToast(`Vehicle registered, but grant upload failed: ${err instanceof Error ? err.message : 'unknown error'}`, 'error')
         }
       } else {
-        showToast('Vehicle successfully registered with Paqar valuation!', 'success')
+        showToast('Vehicle successfully registered!', 'success')
       }
 
       setShowModal(false)
@@ -249,59 +253,6 @@ export default function FrontDeskModule() {
     } catch (err: any) {
       const msg = err?.message || 'Failed to save vehicle'
       showToast(msg.includes('duplicate key value violates unique constraint') ? 'A vehicle with this plate or chassis number is already registered.' : msg, 'error')
-    }
-  }
-
-  async function handleSettingsSave(payload: AccountSettingsPayload): Promise<{ ok: boolean; error?: string }> {
-    if (!currentUserId) return { ok: false, error: 'Not authenticated.' }
-
-    try {
-      if (!payload.username.trim()) {
-        return { ok: false, error: 'Username cannot be empty.' }
-      }
-
-      const { data: existingUsername } = await supabase
-        .from('users')
-        .select('id')
-        .eq('username', payload.username)
-        .neq('id', currentUserId)
-        .maybeSingle()
-
-      if (existingUsername) {
-        return { ok: false, error: 'That username is already taken.' }
-      }
-
-      const { error: profileError } = await supabase
-        .from('users')
-        .update({ full_name: payload.fullName, username: payload.username })
-        .eq('id', currentUserId)
-
-      if (profileError) throw profileError
-
-      if (payload.newPassword.trim()) {
-        if (!payload.oldPassword.trim()) {
-          return { ok: false, error: 'Please enter your current password.' }
-        }
-
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: currentUserEmail,
-          password: payload.oldPassword.trim(),
-        })
-
-        if (signInError) {
-          return { ok: false, error: 'Incorrect old password.' }
-        }
-
-        const { error: passwordError } = await supabase.auth.updateUser({ password: payload.newPassword.trim() })
-        if (passwordError) throw passwordError
-      }
-
-      setSettingsFullName(payload.fullName)
-      setSettingsUsername(payload.username)
-      showToast('Settings & security updated successfully!', 'success')
-      return { ok: true }
-    } catch (err: any) {
-      return { ok: false, error: err.message || 'Failed to update settings.' }
     }
   }
 
@@ -425,20 +376,6 @@ export default function FrontDeskModule() {
     })
   }
 
-  function requestSignOut() {
-    setConfirmModal({
-      title: 'Confirm Sign Out',
-      message: 'Are you sure you want to sign out of the Vehicle Management System?',
-      confirmText: 'Sign Out',
-      confirmVariant: 'danger',
-      onConfirm: async () => {
-        setConfirmModal(null)
-        await supabase.auth.signOut()
-        window.location.href = '/login'
-      }
-    })
-  }
-
   async function handleDownload(url: string, title: string) {
     try {
       const res = await fetch(url)
@@ -477,7 +414,7 @@ export default function FrontDeskModule() {
   const innerCard = isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'
 
   return (
-    <div className={`min-h-screen ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
+    <div className={`min-h-screen ${embedded ? '' : 'pb-24 lg:pb-0 '}${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
       {toast && <Toast message={toast.message} type={toast.type} isDark={isDark} />}
       {confirmModal && (
         <ConfirmModal
@@ -492,53 +429,11 @@ export default function FrontDeskModule() {
       )}
       <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} onNavigate={(index) => setPreviewMedia(prev => (prev ? { ...prev, index } : prev))} isDark={isDark} />
 
-      {/* Settings Modal */}
-      {showSettingsModal && (
-        <AccountSettingsModal
-          isDark={isDark}
-          theme={theme}
-          setTheme={setTheme}
-          title="User Account Settings"
-          subtitle="Manage appearance, profile, and security credentials."
-          email={currentUserEmail}
-          username={settingsUsername}
-          fullName={settingsFullName}
-          accent="blue"
-          onClose={() => setShowSettingsModal(false)}
-          onSave={handleSettingsSave}
-        />
-      )}
-
-      {/* Header */}
-      <header className={`border-b sticky top-0 z-40 backdrop-blur-md ${isDark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'}`}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-2xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-black">🚗</div>
-            <div>
-              <h1 className="text-base font-extrabold tracking-tight">Vehicle Management System</h1>
-              <p className="text-[11px] text-slate-400 hidden sm:block">Front Desk Dashboard</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-            <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className={`p-2 rounded-xl text-xs font-bold border cursor-pointer ${isDark ? 'border-slate-700 bg-slate-800 text-amber-300' : 'border-slate-200 bg-slate-100 text-amber-600'}`}>
-              {isDark ? '☀️' : '🌙'}
-            </button>
-            <button onClick={() => setShowSettingsModal(true)} className={`font-semibold px-3.5 py-2 rounded-xl text-xs border cursor-pointer ${isDark ? 'border-slate-700 bg-slate-800 text-slate-200' : 'border-slate-200 bg-slate-100 text-slate-700'}`}>⚙️ Settings</button>
-            {!selectedVehicle && (
-              <button onClick={() => setShowModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-lg cursor-pointer">
-                + New Vehicle Intake
-              </button>
-            )}
-            <button onClick={requestSignOut} className="font-bold px-3.5 py-2 rounded-xl text-xs border border-rose-900 bg-rose-950 text-rose-300 cursor-pointer">Sign Out</button>
-          </div>
-        </div>
-      </header>
-
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {selectedVehicle ? (
           <div>
             <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-              <button onClick={() => setSelectedVehicle(null)} className={`text-xs font-bold px-3.5 py-2 rounded-xl border cursor-pointer ${isDark ? 'border-slate-800 bg-slate-950 text-blue-400' : 'border-slate-200 bg-white text-blue-600'}`}>
+              <button onClick={() => { setSelectedVehicle(null); const url = new URL(window.location.href); url.searchParams.delete('vehicle'); window.history.replaceState(null, '', url.pathname + url.search) }} className={`text-xs font-bold px-3.5 py-2 rounded-xl border cursor-pointer ${isDark ? 'border-slate-800 bg-slate-950 text-blue-400' : 'border-slate-200 bg-white text-blue-600'}`}>
                 &larr; Back to Registry
               </button>
 
@@ -573,7 +468,7 @@ export default function FrontDeskModule() {
                   <p className={`text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.intake_cost?.toLocaleString()}</p>
                 </div>
                 <div className={`p-5 rounded-2xl border ${innerCard}`}>
-                  <p className="text-[11px] font-bold text-slate-400 uppercase">Market Value (Paqar)</p>
+                  <p className="text-[11px] font-bold text-slate-400 uppercase">Market Value</p>
                   <p className={`text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.market_value?.toLocaleString()}</p>
                 </div>
                 <div className={`p-5 rounded-2xl border ${innerCard}`}>
@@ -596,8 +491,8 @@ export default function FrontDeskModule() {
                         </div>
                         {doc ? (
                           <div className="flex gap-2">
-                            <button onClick={() => setPreviewMedia({ items: [{ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${documentLabel(cat)}` }], index: 0 })} className="w-1/2 bg-blue-950 text-blue-300 hover:bg-blue-900 py-2.5 rounded-xl text-xs font-bold border border-blue-800 cursor-pointer">View</button>
-                            <button onClick={() => requestDeleteDocument(cat)} className="w-1/2 bg-rose-950 text-rose-300 hover:bg-rose-900 py-2.5 rounded-xl text-xs font-bold border border-rose-900 cursor-pointer">Remove</button>
+                            <button onClick={() => setPreviewMedia({ items: [{ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${documentLabel(cat)}` }], index: 0 })} className={`w-1/2 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-blue-950 text-blue-300 hover:bg-blue-900 border-blue-800' : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200'}`}>View</button>
+                            <button onClick={() => requestDeleteDocument(cat)} className={`w-1/2 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 text-rose-300 hover:bg-rose-900 border-rose-900' : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-200'}`}>Remove</button>
                           </div>
                         ) : (
                           <div>
@@ -688,16 +583,21 @@ export default function FrontDeskModule() {
               isDark={isDark}
               title="Active Vehicle Registry"
               right={
-                <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full border ${isDark ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-slate-200 bg-white text-slate-600'}`}>
-                  Total: {vehicles.length} Vehicles
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button onClick={() => setShowModal(true)} className="h-9 px-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs shadow-lg cursor-pointer transition-colors">
+                    + Add Vehicle
+                  </button>
+                  <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full border ${isDark ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-slate-200 bg-white text-slate-600'}`}>
+                    Total: {vehicles.length} Vehicles
+                  </span>
+                </div>
               }
             />
 
             {loading ? (
               <EmptyState isDark={isDark} message="Loading vehicle registry..." />
             ) : vehicles.length === 0 ? (
-              <EmptyState isDark={isDark} message="No vehicles found. Click “+ New Vehicle Intake” to get started." />
+              <EmptyState isDark={isDark} message="No vehicles found. Click “+ Add Vehicle” to get started." />
             ) : (
               <>
                 <div className="hidden md:block">
@@ -723,7 +623,7 @@ export default function FrontDeskModule() {
                       </td>
                       <td className={`p-4 font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {v.intake_cost?.toLocaleString()}</td>
                       <td className="p-4 text-right">
-                        <button onClick={() => setSelectedVehicle(v)} className="px-3.5 py-1.5 rounded-xl font-bold bg-blue-950 text-blue-300 border border-blue-800 hover:bg-blue-900 cursor-pointer">Inspect Details &rarr;</button>
+                        <button onClick={() => setSelectedVehicle(v)} className={`px-3.5 py-1.5 rounded-xl font-bold border cursor-pointer transition-colors ${isDark ? 'bg-blue-950 text-blue-300 border-blue-800 hover:bg-blue-900' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}>Inspect Details &rarr;</button>
                       </td>
                     </tr>
                   ))}
@@ -744,7 +644,7 @@ export default function FrontDeskModule() {
                         <p>Insurance: {v.insurance_panel || 'N/A'}</p>
                         <p className="font-bold text-white">RM {v.intake_cost?.toLocaleString()}</p>
                       </div>
-                      <button onClick={() => setSelectedVehicle(v)} className="w-full px-3.5 py-2.5 rounded-xl font-bold bg-blue-950 text-blue-300 border border-blue-800 hover:bg-blue-900 cursor-pointer text-xs">
+                      <button onClick={() => setSelectedVehicle(v)} className={`w-full px-3.5 py-2.5 rounded-xl font-bold border cursor-pointer transition-colors text-xs ${isDark ? 'bg-blue-950 text-blue-300 border-blue-800 hover:bg-blue-900' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}>
                         Inspect Details &rarr;
                       </button>
                     </div>
