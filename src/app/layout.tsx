@@ -17,7 +17,6 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Vehicle Management System",
   description: "Workshop vehicle management — intake, repairs, technicians, and company oversight.",
-  manifest: "/manifest.webmanifest",
   icons: {
     icon: "/icons/icon-192.png",
     apple: "/icons/apple-touch-icon.png",
