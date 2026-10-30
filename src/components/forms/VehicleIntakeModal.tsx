@@ -186,6 +186,10 @@ async function compressForUpload(file: File): Promise<string> {
     return dataUrl.slice(dataUrl.indexOf(',') + 1)
 }
 
+function isPdfFile(file: File): boolean {
+    return file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+}
+
 type GeminiResult = {
     fields: ParsedGrant
     confidence: Record<string, number>
@@ -439,6 +443,16 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         const file = e.target.files?.[0]
         e.target.value = ''
         if (!file) return
+
+        // A PDF grant is the DOCUMENT, not the scan source: attach it so it is
+        // saved watermarked under Vehicle Grant (VOC), and ask for a photo of
+        // the certificate page to run the OCR scan (more reliable for fields).
+        if (isPdfFile(file)) {
+            setGrantFile(file)
+            showToast('PDF attached — it will be saved as the watermarked Vehicle Grant (VOC) document. Now take a photo of the certificate page to scan the details.', 'success')
+            return
+        }
+
         setOcrBusy(true)
         let geminiUnavailable = false
         try {
@@ -455,8 +469,12 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                 setOcrInspect(buildGrantInspect(classification, 'cloud', 0, [], { model: gemini.model, score: overall, confidence: gemini.confidence }))
                 applyParsed(gemini.fields, 0)
                 // Keep the scanned photo + scan record so saving can auto-store the
-                // grant document and persist the score for admin monitoring.
-                setGrantFile(file)
+                // grant document and persist the score for admin monitoring. If a
+                // PDF was already attached, keep THAT as the document — the photo
+                // was only for reading the fields.
+                if (!(grantFile && isPdfFile(grantFile))) {
+                    setGrantFile(file)
+                }
                 setOcrScan({ model: gemini.model, score: overall, filled, total: 7, ts: Date.now() })
                 return
             }
@@ -577,7 +595,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                         <input
                             ref={fileInputRef}
                             type="file"
-                            accept="image/*"
+                            accept="image/*,application/pdf"
                             className="hidden"
                             onChange={handleGrantFile}
                         />
@@ -604,7 +622,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                                 disabled={ocrBusy}
                                 className={`py-3 rounded-xl text-xs font-extrabold transition-all shadow-md cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
                             >
-                                📁 Upload Photo
+                                📁 Upload Photo / PDF
                             </button>
                         </div>
                         {ocrBusy && (
@@ -613,7 +631,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                             </p>
                         )}
                         <p className={`text-[10px] font-medium mt-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                            Upload a photo of the vehicle grant (SIJIL PEMILIKAN KENDERAAN) to auto-fill plate, chassis, make, model, spec &amp; year — any orientation works. Review the fields before saving.
+                            Upload a photo of the vehicle grant (SIJIL PEMILIKAN KENDERAAN) to auto-fill plate, chassis, make, model, spec &amp; year — any orientation works. Review the fields before saving. You can also attach the original grant PDF — it is saved as the watermarked Vehicle Grant (VOC) document, while a photo of the certificate page does the scanning.
                         </p>
                     </div>
 

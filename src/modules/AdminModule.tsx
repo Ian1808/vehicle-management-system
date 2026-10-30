@@ -11,6 +11,7 @@ import StatusBadge from '@/components/ui/StatusBadge'
 import SectionHeading from '@/components/ui/SectionHeading'
 import EmptyState from '@/components/ui/EmptyState'
 import ResponsiveTable from '@/components/ui/ResponsiveTable'
+import CompanyNameModal from '@/components/ui/CompanyNameModal'
 import StaffUserModal, { type StaffUserPayload } from '@/components/admin/StaffUserModal'
 import ThirdPartyAssignmentPanel from '@/components/assignments/ThirdPartyAssignmentPanel'
 import ChangePasswordModal from '@/components/admin/ChangePasswordModal'
@@ -153,6 +154,8 @@ export default function AdminModule() {
     const [insurancePanels, setInsurancePanels] = useState<InsurancePanelRecord[]>([])
     const [users, setUsers] = useState<UserProfile[]>([])
     const [companies, setCompanies] = useState<CompanyRecord[]>([])
+    const [editingCompany, setEditingCompany] = useState<CompanyRecord | null>(null)
+    const [deleteCompanyTarget, setDeleteCompanyTarget] = useState<CompanyRecord | null>(null)
     const [scanLogs, setScanLogs] = useState<ScanLogEntry[]>([])
     const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
@@ -322,6 +325,40 @@ export default function AdminModule() {
             setCompanies([])
         } else {
             setCompanies(data || [])
+        }
+    }
+
+    async function handleSaveCompanyName(name: string) {
+        if (!editingCompany || !name) return
+        const { error } = await supabase
+            .from('companies')
+            .update({ name })
+            .eq('id', editingCompany.id)
+        if (error) {
+            showToast(error.message, 'error')
+        } else {
+            showToast(`Company renamed to "${name}".`, 'success')
+            setEditingCompany(null)
+            await fetchCompanies()
+        }
+    }
+
+    function requestDeleteCompany(c: CompanyRecord) {
+        setDeleteCompanyTarget(c)
+    }
+
+    async function confirmDeleteCompany() {
+        if (!deleteCompanyTarget) return
+        const { error } = await supabase
+            .from('companies')
+            .delete()
+            .eq('id', deleteCompanyTarget.id)
+        if (error) {
+            showToast(error.message, 'error')
+        } else {
+            showToast(`Company "${deleteCompanyTarget.name}" deleted.`, 'success')
+            setDeleteCompanyTarget(null)
+            await fetchCompanies()
         }
     }
 
@@ -1504,10 +1541,47 @@ export default function AdminModule() {
                                                     </p>
                                                 </div>
                                             </div>
+                                            <div className="flex gap-2 mt-4">
+                                                <button
+                                                    onClick={() => setEditingCompany(c)}
+                                                    className="flex-1 bg-purple-600 hover:bg-purple-500 text-white px-3 py-2.5 rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
+                                                >
+                                                    ✏️ Edit
+                                                </button>
+                                                <button
+                                                    onClick={() => requestDeleteCompany(c)}
+                                                    className={`flex-1 px-3 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
+                                                >
+                                                    🗑️ Delete
+                                                </button>
+                                            </div>
                                         </Card>
                                     )
                                 })}
                             </div>
+                        )}
+
+                        {editingCompany && (
+                            <CompanyNameModal
+                                title={`Edit Company — ${editingCompany.name}`}
+                                initialName={editingCompany.name}
+                                isDark={isDark}
+                                accent="purple"
+                                onSave={handleSaveCompanyName}
+                                onClose={() => setEditingCompany(null)}
+                            />
+                        )}
+
+                        {deleteCompanyTarget && (
+                            <ConfirmModal
+                                isDark={isDark}
+                                title="Delete Company?"
+                                message={`Delete "${deleteCompanyTarget.name}"? Its banks & insurance panels will also be deleted, and its staff & vehicles will be unlinked (company becomes unassigned). This cannot be undone.`}
+                                confirmText="Delete"
+                                confirmVariant="danger"
+                                onConfirm={confirmDeleteCompany}
+                                onCancel={() => setDeleteCompanyTarget(null)}
+                            />
                         )}
                     </div>
                 )}

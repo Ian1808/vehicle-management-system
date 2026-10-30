@@ -8,6 +8,7 @@ import Card from '@/components/ui/Card'
 import SectionHeading from '@/components/ui/SectionHeading'
 import EmptyState from '@/components/ui/EmptyState'
 import StatusBadge from '@/components/ui/StatusBadge'
+import CompanyNameModal from '@/components/ui/CompanyNameModal'
 
 type ToastState = { message: string; type: 'success' | 'error' } | null
 
@@ -47,6 +48,7 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
     const [companies, setCompanies] = useState<{ id: string; name: string }[]>([])
     const [vehicles, setVehicles] = useState<CompanyVehicle[]>([])
     const [staff, setStaff] = useState<CompanyStaff[]>([])
+    const [editCompanyOpen, setEditCompanyOpen] = useState(false)
 
     const supabase = useMemo(() => createClient(), [])
 
@@ -147,6 +149,27 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
         setLoading(false)
     }
 
+    async function handleSaveCompanyName(name: string) {
+        if (!viewCompanyId || !name) return
+        const { error } = await supabase
+            .from('companies')
+            .update({ name })
+            .eq('id', viewCompanyId)
+        if (error) {
+            showToast(error.message, 'error')
+        } else {
+            showToast('Company updated.', 'success')
+            setCompanyName(name)
+            setEditCompanyOpen(false)
+            // Keep the admin company selector list in sync
+            const { data } = await supabase
+                .from('companies')
+                .select('id, name')
+                .order('name', { ascending: true })
+            if (data) setCompanies(data)
+        }
+    }
+
     // ---- Company metrics ----
     const intake = vehicles.reduce((a, v) => a + Number(v.intake_cost || 0), 0)
     const market = vehicles.reduce((a, v) => a + Number(v.market_value || 0), 0)
@@ -196,7 +219,19 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                     subtitle={role === 'admin'
                         ? 'Admin preview: inspect any company\'s fleet, staff, and financials. All data below is scoped to the selected company.'
                         : "Your company's fleet, staff, and financials at a glance. Work is split across Front Desk, Technicians, and Staff Management."}
-                    right={companySelector}
+                    right={
+                        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                            {companySelector}
+                            {role === 'manager' && viewCompanyId && (
+                                <button
+                                    onClick={() => setEditCompanyOpen(true)}
+                                    className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2.5 rounded-2xl text-xs font-bold shadow-lg transition-all cursor-pointer whitespace-nowrap"
+                                >
+                                    ✏️ Edit Company
+                                </button>
+                            )}
+                        </div>
+                    }
                 />
 
                 {loading ? (
@@ -312,6 +347,17 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                     </>
                 )}
             </main>
+
+            {editCompanyOpen && (
+                <CompanyNameModal
+                    title="Edit Company"
+                    initialName={companyName}
+                    isDark={isDark}
+                    accent="purple"
+                    onSave={handleSaveCompanyName}
+                    onClose={() => setEditCompanyOpen(false)}
+                />
+            )}
         </div>
     )
 }
