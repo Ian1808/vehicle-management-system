@@ -405,7 +405,8 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
   function openCostEdit(field: CostField, label: string) {
     if (!selectedVehicle) return
     const current = currentCostValue(field)
-    setCostEdit({ field, label, value: current ? String(current) : '' })
+    // Prefill even when the current value is 0 — an empty input would fail validation (NaN) and block the confirm flow.
+    setCostEdit({ field, label, value: String(current) })
   }
 
   // Step 2: validate, close the popup, and open the confirm modal.
