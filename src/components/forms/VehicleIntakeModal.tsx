@@ -190,6 +190,18 @@ function isPdfFile(file: File): boolean {
     return file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
 }
 
+// Reads a file as raw base64 (used for PDFs — canvas compression does not
+// apply, Gemini reads the PDF natively).
+async function fileToBase64(file: File): Promise<string> {
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    let bin = ''
+    const CHUNK = 0x8000
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+        bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+    }
+    return btoa(bin)
+}
+
 type GeminiResult = {
     fields: ParsedGrant
     confidence: Record<string, number>
@@ -200,19 +212,26 @@ type GeminiResult = {
 // Calls the server route that proxies to Gemini (gemini-3.8-flash, thinking
 // low). Returns { fields, confidence, text, model } on a successful scan,
 // { unavailable: true } when the route reports no key / the API is disabled
-// (so the UI can hint at setup), or null when the scan itself failed (no
-// result / timeout) and the offline fallback should run. A 25s timeout
-// guarantees the scanner can never spin forever.
-async function tryGeminiOcr(file: File): Promise<GeminiResult | { unavailable: true } | null> {
+// (so the UI can hint at setup), { pdfTooLarge: true } when a PDF exceeds the
+// deploy body-size limit (it is sent raw, unlike compressed photos), or null
+// when the scan itself failed (no result / timeout) and the offline fallback
+// should run. Timeouts: 25s for photos, 45s for PDFs (Gemini needs longer to
+// parse a PDF document) — the scanner can never spin forever.
+async function tryGeminiOcr(file: File): Promise<GeminiResult | { unavailable: true } | { pdfTooLarge: true } | null> {
+    const isPdf = isPdfFile(file)
     try {
-        const imageBase64 = await compressForUpload(file)
+        // PDFs are sent as-is; 3 MB of raw PDF ≈ 4 MB of base64, which is the
+        // practical body limit on Vercel Hobby serverless functions.
+        if (isPdf && file.size > 3_000_000) return { pdfTooLarge: true }
+        const imageBase64 = isPdf ? await fileToBase64(file) : await compressForUpload(file)
+        const mimeType = isPdf ? 'application/pdf' : 'image/jpeg'
         const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), 25000)
+        const timer = setTimeout(() => controller.abort(), isPdf ? 45000 : 25000)
         try {
             const res = await fetch('/api/ocr/grant', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageBase64, mimeType: 'image/jpeg' }),
+                body: JSON.stringify({ imageBase64, mimeType }),
                 signal: controller.signal,
             })
             if (res.status === 503) return { unavailable: true }
@@ -444,20 +463,13 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         e.target.value = ''
         if (!file) return
 
-        // A PDF grant is the DOCUMENT, not the scan source: attach it so it is
-        // saved watermarked under Vehicle Grant (VOC), and ask for a photo of
-        // the certificate page to run the OCR scan (more reliable for fields).
-        if (isPdfFile(file)) {
-            setGrantFile(file)
-            showToast('PDF attached — it will be saved as the watermarked Vehicle Grant (VOC) document. Now take a photo of the certificate page to scan the details.', 'success')
-            return
-        }
-
         setOcrBusy(true)
         let geminiUnavailable = false
+        const isPdf = isPdfFile(file)
         try {
             // 1) Gemini (gemini-3.8-flash, thinking low) — reads the certificate
             // in any orientation and returns structured fields + a score.
+            // Grant PDFs are sent natively (application/pdf) and read directly.
             setOcrStatus('reading')
             const gemini = await tryGeminiOcr(file)
             if (gemini && 'fields' in gemini) {
@@ -468,17 +480,33 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                 const classification = geminiToClassification(gemini.fields, gemini.text)
                 setOcrInspect(buildGrantInspect(classification, 'cloud', 0, [], { model: gemini.model, score: overall, confidence: gemini.confidence }))
                 applyParsed(gemini.fields, 0)
-                // Keep the scanned photo + scan record so saving can auto-store the
-                // grant document and persist the score for admin monitoring. If a
-                // PDF was already attached, keep THAT as the document — the photo
-                // was only for reading the fields.
-                if (!(grantFile && isPdfFile(grantFile))) {
-                    setGrantFile(file)
-                }
+                // Keep the scanned file + scan record so saving can auto-store
+                // the grant document (PDFs get watermarked and saved as-is) and
+                // persist the score for admin monitoring.
+                setGrantFile(file)
                 setOcrScan({ model: gemini.model, score: overall, filled, total: 7, ts: Date.now() })
                 return
             }
             geminiUnavailable = gemini !== null && 'unavailable' in gemini
+
+            if (gemini && 'pdfTooLarge' in gemini) {
+                // Still attach the PDF as the document so it is not lost — the
+                // fields just could not be read from it (server body-size limit).
+                setGrantFile(file)
+                showToast('This PDF is larger than 3 MB, which exceeds the scan upload limit. It will still be saved as the grant document — fill in the details manually or scan a photo of the certificate page.', 'error')
+                return
+            }
+
+            // PDFs skip the offline Tesseract fallback — the local engine can
+            // only read raster images, not PDF documents.
+            if (isPdf) {
+                if (geminiUnavailable) {
+                    showToast('Gemini is unavailable (check GEMINI_API_KEY in .env.local — the Generative Language API must be enabled for your Google Cloud project), and PDF scanning requires it. Please fill in the details manually.', 'error')
+                } else {
+                    showToast('Could not read vehicle details from this PDF. Make sure the scan is clear, or fill in the details manually.', 'error')
+                }
+                return
+            }
 
             // 2) Offline Tesseract fallback (tries 0°/90°/180°/270°; keeps the best).
             setOcrStatus('loading')
@@ -627,11 +655,11 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                         </div>
                         {ocrBusy && (
                             <p className={`text-[10px] font-bold mt-2 ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>
-                                {ocrStatus === 'loading' ? '⏳ Preparing OCR engine (first scan downloads ~15 MB, please wait)…' : ocrStatus === 'reading' ? (ocrPass > 1 ? `📖 Reading text from photo (pass ${ocrPass}/4 — trying orientations)…` : '📖 Reading text from photo…') : '✨ Filling in fields…'}
+                                {ocrStatus === 'loading' ? '⏳ Preparing OCR engine (first scan downloads ~15 MB, please wait)…' : ocrStatus === 'reading' ? (ocrPass > 1 ? `📖 Reading text from photo (pass ${ocrPass}/4 — trying orientations)…` : '📖 Reading text from document…') : '✨ Filling in fields…'}
                             </p>
                         )}
                         <p className={`text-[10px] font-medium mt-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                            Upload a photo of the vehicle grant (SIJIL PEMILIKAN KENDERAAN) to auto-fill plate, chassis, make, model, spec &amp; year — any orientation works. Review the fields before saving. You can also attach the original grant PDF — it is saved as the watermarked Vehicle Grant (VOC) document, while a photo of the certificate page does the scanning.
+                            Upload a photo of the vehicle grant (SIJIL PEMILIKAN KENDERAAN) to auto-fill plate, chassis, make, model, spec &amp; year — any orientation works. A grant PDF can also be uploaded: its details are scanned and it is saved as the watermarked Vehicle Grant (VOC) document. Review the fields before saving.
                         </p>
                     </div>
 

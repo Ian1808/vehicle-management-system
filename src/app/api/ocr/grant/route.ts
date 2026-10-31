@@ -15,7 +15,7 @@ const MODEL = 'gemini-3.8-flash'
 // the 10s default (Hobby allows up to 60s).
 export const maxDuration = 60
 
-const PROMPT = `You are reading a Malaysian JPJ vehicle ownership certificate (SIJIL PEMILIKAN KENDERAAN / vehicle grant) from a photo. The photo may be rotated in any orientation — orient it yourself.
+const PROMPT = `You are reading a Malaysian JPJ vehicle ownership certificate (SIJIL PEMILIKAN KENDERAAN / vehicle grant) from a photo or a scanned PDF. The photo may be rotated in any orientation — orient it yourself. If the input is a PDF, the certificate is usually on the first page — extract from that page.
 
 Extract these fields and return STRICT JSON only (no markdown, no commentary):
 - plate: registration plate number (No. Pendaftaran), e.g. "PNP176". Empty string if not readable.
@@ -63,7 +63,7 @@ async function callGemini(key: string, imageBase64: string, mimeType: string) {
                     'Content-Length': Buffer.byteLength(payload),
                     Connection: 'close',
                 },
-                timeout: 30000,
+                timeout: 55000,
             },
             (res) => {
                 let data = ''
@@ -135,6 +135,9 @@ export async function POST(req: NextRequest) {
     }
     if (!imageBase64) {
         return NextResponse.json({ error: 'bad_request', message: 'imageBase64 is required' }, { status: 400 })
+    }
+    if (!['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(mimeType)) {
+        return NextResponse.json({ error: 'bad_request', message: 'Unsupported file type' }, { status: 400 })
     }
 
     let geminiText = ''
