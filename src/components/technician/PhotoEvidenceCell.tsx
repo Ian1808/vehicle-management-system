@@ -19,14 +19,14 @@ export default function PhotoEvidenceCell({ isDark, phase, isCaptured, photoUrl,
     const phaseColor = phase === 'before' ? 'text-amber-400' : 'text-blue-400'
 
     return (
-        <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
+        <div className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
             <div>
-                <p className={`text-[10px] font-bold uppercase ${phaseColor} mb-1`}>{phaseTitle}</p>
+                <p className={`text-[11px] font-bold uppercase ${phaseColor} mb-1`}>{phaseTitle}</p>
                 <p className={`text-[11px] mb-3 font-semibold ${isCaptured ? 'text-emerald-400' : 'text-slate-500'}`}>{isCaptured ? '✓ Captured' : 'Pending'}</p>
             </div>
             <div className="space-y-2">
                 {isCaptured && (photoUrl ? (
-                    <PhotoThumb url={photoUrl} alt={`${phaseTitle} photo`} onClick={onView} className="h-24" />
+                    <PhotoThumb url={photoUrl} alt={`${phaseTitle} photo`} onClick={onView} className="h-32 sm:h-40" />
                 ) : (
                     <button onClick={onView} className={`w-full py-2 rounded-lg text-xs font-bold border cursor-pointer ${phase === 'before'
                         ? (isDark ? 'bg-slate-900 text-emerald-400 border-slate-700' : 'bg-white text-emerald-600 border-slate-200')

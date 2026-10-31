@@ -799,7 +799,7 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                                                                 url={item.file_url}
                                                                 alt={`${selectedVehicle?.plate_number ?? ''} - ${displayTitle}`}
                                                                 onClick={() => openAdditionalGallery(item.file_url)}
-                                                                className="h-24"
+                                                                className="h-40"
                                                             />
                                                             {additionalMode === 'edit' && (
                                                                 <button
@@ -850,16 +850,16 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                                 </thead>
                                 <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
                                     {vehicles.map((v) => (
-                                        <tr key={v.id} className={`transition-colors ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
-                                            <td className="p-4 font-bold text-sm text-emerald-400">{v.plate_number}</td>
-                                            <td className="p-4">{v.make_model_year}</td>
-                                            <td className="p-4">
+                                        <tr key={v.id} onClick={() => setSelectedVehicle(v)} className={`transition-colors cursor-pointer ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
+                                            <td className="p-5 font-bold text-base text-emerald-400">{v.plate_number}</td>
+                                            <td className="p-5">{v.make_model_year}</td>
+                                            <td className="p-5">
                                                 <StatusBadge status={v.status} />
                                             </td>
-                                            <td className="p-4 text-right">
-                                                <button onClick={() => setSelectedVehicle(v)} className={`px-3.5 py-1.5 rounded-xl font-bold border cursor-pointer transition-colors ${isDark ? 'bg-emerald-950 text-emerald-300 border-emerald-800 hover:bg-emerald-900' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}>
-                                                    Capture Evidence &rarr;
-                                                </button>
+                                            <td className="p-5 text-right">
+                                                <span className={`inline-block px-3.5 py-1.5 rounded-xl font-bold border ${isDark ? 'bg-emerald-950 text-emerald-300 border-emerald-800' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                                                    Open &rarr;
+                                                </span>
                                             </td>
                                         </tr>
                                     ))}
@@ -867,18 +867,16 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                             </ResponsiveTable>
                             </div>
 
-                            {/* Mobile card list */}
+                            {/* Mobile card list — tap the card to open the vehicle */}
                             <div className="md:hidden space-y-3">
                                 {vehicles.map((v) => (
-                                    <div key={v.id} className={`border rounded-2xl p-4 flex flex-col gap-3 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                                    <div key={v.id} onClick={() => setSelectedVehicle(v)} className={`border rounded-2xl p-5 flex flex-col gap-3 cursor-pointer active:scale-[0.99] transition-transform ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                                         <div className="flex items-center justify-between gap-2">
-                                            <span className="text-sm font-bold text-emerald-400">{v.plate_number}</span>
+                                            <span className="text-base font-bold text-emerald-400">{v.plate_number}</span>
                                             <StatusBadge status={v.status} />
                                         </div>
-                                        <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{v.make_model_year}</p>
-                                        <button onClick={() => setSelectedVehicle(v)} className={`w-full px-3.5 py-2.5 rounded-xl font-bold border cursor-pointer transition-colors text-xs ${isDark ? 'bg-emerald-950 text-emerald-300 border-emerald-800 hover:bg-emerald-900' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}>
-                                            Capture Evidence &rarr;
-                                        </button>
+                                        <p className={`text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{v.make_model_year}</p>
+                                        <span className={`text-xs font-extrabold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>Capture Evidence →</span>
                                     </div>
                                 ))}
                             </div>

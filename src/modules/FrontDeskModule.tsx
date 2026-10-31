@@ -93,7 +93,6 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
   const [costEdit, setCostEdit] = useState<{ field: CostField; label: string; value: string } | null>(null)
   const [pendingCostSave, setPendingCostSave] = useState<{ field: CostField; label: string; amount: number } | null>(null)
   const [costSaving, setCostSaving] = useState(false)
-  const [photoFilter, setPhotoFilter] = useState<'before' | 'after' | 'additional'>('before')
   const { isDark } = useTheme()
 
   // User State
@@ -179,7 +178,6 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
     async function loadMedia() {
       if (selectedVehicle) {
         setDetailTab('overview')
-        setPhotoFilter('before')
         try {
           const media = await fetchVehicleMedia(selectedVehicle.id)
           setMediaItems(media)
@@ -500,12 +498,6 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
   const beforePhotos = mediaItems.filter(m => m.media_type === 'photo_before')
   const afterPhotos = mediaItems.filter(m => m.media_type === 'photo_after')
   const photoCount = beforePhotos.length + afterPhotos.length
-  const visiblePhotoFilters = [
-    ...(showBefore ? [{ key: 'before' as const, label: 'Before Repair', count: beforePhotos.length }] : []),
-    ...(showAfter ? [{ key: 'after' as const, label: 'After Repair', count: afterPhotos.length }] : []),
-    ...(showAdditional ? [{ key: 'additional' as const, label: 'Additional', count: additionalPhotos.length }] : []),
-  ]
-  const activePhotoFilter = visiblePhotoFilters.some(f => f.key === photoFilter) ? photoFilter : (visiblePhotoFilters[0]?.key ?? 'before')
 
   return (
     <div className={`min-h-screen ${embedded ? '' : 'pb-24 lg:pb-0 '}${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
@@ -576,13 +568,13 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
                     <StatusBadge status={selectedVehicle.status} />
                   </div>
                   <p className={`mt-1 font-semibold text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{selectedVehicle.make_model_year}</p>
-                  <p className={`text-xs font-mono mt-2 inline-block px-3 py-1 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
-                    VIN: <span className={isDark ? 'text-white' : 'text-slate-900'}>{selectedVehicle.chassis_number}</span>
+                  <p className={`text-sm font-mono mt-2 inline-block max-w-full px-3.5 py-1.5 rounded-xl border break-all ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                    VIN: <span className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedVehicle.chassis_number}</span>
                   </p>
                 </div>
-                <div className={`px-4 py-3 rounded-2xl border w-fit ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                <div className={`px-5 py-3.5 rounded-2xl border w-full sm:w-auto ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                   <p className="text-[10px] uppercase text-slate-400 font-extrabold tracking-wider">Insurance Panel</p>
-                  <p className={`text-sm font-bold mt-0.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedVehicle.insurance_panel || 'None Assigned'}</p>
+                  <p className={`text-base font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedVehicle.insurance_panel || 'None Assigned'}</p>
                 </div>
               </div>
 
@@ -610,15 +602,16 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
               {/* --- Overview tab --- */}
               {detailTab === 'overview' && (
                 <div className="pt-5">
-                  <div className="flex items-center gap-0.5 sm:gap-1 overflow-x-auto pb-2">
+                  {/* Progress stepper — connectors stretch to fill the container width */}
+                  <div className="flex items-center overflow-x-auto pb-2">
                     {STATUS_STEPS.map((step, i) => {
                       const currentIdx = STATUS_STEPS.findIndex(s => s.key === selectedVehicle.status)
                       const done = currentIdx > i
                       const current = currentIdx === i
                       return (
-                        <div key={step.key} className="flex items-center gap-0.5 sm:gap-1 shrink-0">
-                          {i > 0 && <div className={`h-0.5 w-1 sm:w-5 ${done || current ? (isDark ? 'bg-emerald-500' : 'bg-emerald-400') : (isDark ? 'bg-slate-700' : 'bg-slate-300')}`} />}
-                          <span className={`px-1.5 sm:px-2.5 py-1 rounded-full text-[9px] sm:text-[10px] font-extrabold whitespace-nowrap ${done ? (isDark ? 'bg-emerald-900/60 text-emerald-300' : 'bg-emerald-100 text-emerald-700') : current ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-800 text-slate-500' : 'bg-slate-100 text-slate-400'}`}>
+                        <div key={step.key} className="flex items-center flex-1 last:flex-none min-w-0">
+                          {i > 0 && <div className={`h-1 flex-1 mx-0.5 sm:mx-1.5 rounded-full ${done || current ? (isDark ? 'bg-emerald-500' : 'bg-emerald-400') : (isDark ? 'bg-slate-700' : 'bg-slate-300')}`} />}
+                          <span className={`shrink-0 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[10px] sm:text-[11px] font-extrabold whitespace-nowrap ${done ? (isDark ? 'bg-emerald-900/60 text-emerald-300' : 'bg-emerald-100 text-emerald-700') : current ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-800 text-slate-500' : 'bg-slate-100 text-slate-400'}`}>
                             {done ? '✓ ' : ''}<span className="hidden sm:inline">{step.label}</span><span className="sm:hidden">{step.short}</span>
                           </span>
                         </div>
@@ -725,73 +718,71 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
                 <div className="pt-6">
                   <h3 className={`text-sm font-extrabold tracking-wider uppercase mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>Technician Photo Evidence (Read-Only)</h3>
 
-                  <div className="flex gap-2 flex-wrap">
-                    {visiblePhotoFilters.map(f => (
-                      <button
-                        key={f.key}
-                        onClick={() => setPhotoFilter(f.key)}
-                        className={`px-4 py-2 rounded-xl text-xs font-extrabold border cursor-pointer transition-colors ${activePhotoFilter === f.key ? 'bg-blue-600 text-white border-blue-600' : isDark ? 'border-slate-700 bg-slate-900 text-slate-400 hover:text-white' : 'border-slate-200 bg-white text-slate-600 hover:text-slate-900'}`}
-                      >
-                        {f.label} · {f.count}
-                      </button>
-                    ))}
-                  </div>
-
-                  {activePhotoFilter === 'before' && (
-                    <div className="mt-4">
-                      {beforePhotos.length === 0 ? (
-                        <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No Before photos captured yet.</p>
-                      ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                          {beforePhotos.map((item) => {
-                            const cat = PHOTO_CATEGORIES.find(c => c.key === item.category)
-                            return (
-                              <div key={item.id} className={`border rounded-2xl p-3 flex flex-col justify-between ${innerCard}`}>
-                                <p className={`text-[10px] font-extrabold uppercase mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>{cat?.label ?? item.category}</p>
-                                <PhotoThumb url={item.file_url} alt={`${selectedVehicle.plate_number} - ${cat?.label ?? item.category} (Before)`} onClick={() => openPhaseGallery('photo_before', item.file_url)} className="h-24" />
-                              </div>
-                            )
-                          })}
+                  {!showBefore && !showAfter && additionalPhotos.length === 0 ? (
+                    <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No photo evidence has been captured for this vehicle yet.</p>
+                  ) : (
+                    <div className="mt-5 space-y-7">
+                      {/* Before / After comparison by angle */}
+                      {(showBefore || showAfter) && (
+                        <div>
+                          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                            <h4 className={`text-xs font-extrabold uppercase tracking-wider ${isDark ? 'text-white' : 'text-slate-900'}`}>Before & After by Angle</h4>
+                            <span className={`text-[11px] font-bold px-3 py-1 rounded-full border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
+                              {showBefore && `Before ${beforePhotos.length}`}{showBefore && showAfter && ' · '}{showAfter && `After ${afterPhotos.length}`}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {PHOTO_CATEGORIES.map((cat) => {
+                              const before = beforePhotos.find(m => m.category === cat.key)
+                              const after = afterPhotos.find(m => m.category === cat.key)
+                              if (!before && !after) return null
+                              return (
+                                <div key={cat.key} className={`border rounded-2xl p-4 ${innerCard}`}>
+                                  <p className={`text-xs font-extrabold uppercase mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>{cat.label}</p>
+                                  <div className="grid grid-cols-2 gap-3">
+                                    {showBefore && (
+                                      <div>
+                                        <p className="text-[10px] font-bold text-amber-400 uppercase mb-1.5">Before</p>
+                                        {before ? (
+                                          <PhotoThumb url={before.file_url} alt={`${selectedVehicle.plate_number} - ${cat.label ?? before.category} (Before)`} onClick={() => openPhaseGallery('photo_before', before.file_url)} className="h-32 sm:h-40" />
+                                        ) : (
+                                          <div className={`h-32 sm:h-40 rounded-xl border border-dashed flex items-center justify-center text-center text-[10px] font-semibold px-2 ${isDark ? 'border-slate-800 text-slate-600' : 'border-slate-300 text-slate-400'}`}>Not captured</div>
+                                        )}
+                                      </div>
+                                    )}
+                                    {showAfter && (
+                                      <div>
+                                        <p className="text-[10px] font-bold text-blue-400 uppercase mb-1.5">After</p>
+                                        {after ? (
+                                          <PhotoThumb url={after.file_url} alt={`${selectedVehicle.plate_number} - ${cat.label ?? after.category} (After)`} onClick={() => openPhaseGallery('photo_after', after.file_url)} className="h-32 sm:h-40" />
+                                        ) : (
+                                          <div className={`h-32 sm:h-40 rounded-xl border border-dashed flex items-center justify-center text-center text-[10px] font-semibold px-2 ${isDark ? 'border-slate-800 text-slate-600' : 'border-slate-300 text-slate-400'}`}>Not captured</div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
                         </div>
                       )}
-                    </div>
-                  )}
 
-                  {activePhotoFilter === 'after' && (
-                    <div className="mt-4">
-                      {afterPhotos.length === 0 ? (
-                        <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No After photos captured yet.</p>
-                      ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                          {afterPhotos.map((item) => {
-                            const cat = PHOTO_CATEGORIES.find(c => c.key === item.category)
-                            return (
-                              <div key={item.id} className={`border rounded-2xl p-3 flex flex-col justify-between ${innerCard}`}>
-                                <p className={`text-[10px] font-extrabold uppercase mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>{cat?.label ?? item.category}</p>
-                                <PhotoThumb url={item.file_url} alt={`${selectedVehicle.plate_number} - ${cat?.label ?? item.category} (After)`} onClick={() => openPhaseGallery('photo_after', item.file_url)} className="h-24" />
+                      {/* Additional evidence */}
+                      {showAdditional && additionalPhotos.length > 0 && (
+                        <div>
+                          <h4 className={`text-xs font-extrabold uppercase tracking-wider mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>Additional Evidence ({additionalPhotos.length})</h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            {additionalPhotos.map((item) => (
+                              <div key={item.id} className={`border rounded-2xl p-4 flex flex-col justify-between ${innerCard}`}>
+                                <div>
+                                  <p className={`text-xs font-extrabold uppercase mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{additionalLabel(item.category)}</p>
+                                  <p className="text-[11px] font-semibold text-purple-400 mb-3">✓ Captured</p>
+                                </div>
+                                <PhotoThumb url={item.file_url} alt={`${selectedVehicle.plate_number} - ${additionalLabel(item.category)} (Additional)`} onClick={() => openAdditionalGallery(item.file_url)} className="h-40" />
                               </div>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {activePhotoFilter === 'additional' && (
-                    <div className="mt-4">
-                      {additionalPhotos.length === 0 ? (
-                        <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No additional photos uploaded by technician.</p>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                          {additionalPhotos.map((item) => (
-                            <div key={item.id} className={`border rounded-2xl p-4 flex flex-col justify-between ${innerCard}`}>
-                              <div>
-                                <p className={`text-xs font-extrabold uppercase mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{additionalLabel(item.category)}</p>
-                                <p className="text-[11px] font-semibold text-purple-400 mb-3">✓ Captured</p>
-                              </div>
-                              <PhotoThumb url={item.file_url} alt={`${selectedVehicle.plate_number} - ${additionalLabel(item.category)} (Additional)`} onClick={() => openAdditionalGallery(item.file_url)} className="h-24" />
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -852,15 +843,15 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
                 <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
                   {vehicles.map((v) => (
                     <tr key={v.id} onClick={() => setSelectedVehicle(v)} className={`transition-colors cursor-pointer ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
-                      <td className="p-4 font-bold text-sm text-blue-400">{v.plate_number}</td>
-                      <td className="p-4">{v.make_model_year}</td>
-                      <td className="p-4 text-slate-400">{v.insurance_panel || 'N/A'}</td>
-                      <td className="p-4">
+                      <td className="p-5 font-bold text-base text-blue-400">{v.plate_number}</td>
+                      <td className="p-5">{v.make_model_year}</td>
+                      <td className="p-5 text-slate-400">{v.insurance_panel || 'N/A'}</td>
+                      <td className="p-5">
                         <StatusBadge status={v.status} />
                       </td>
-                      <td className={`p-4 font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {v.intake_cost?.toLocaleString()}</td>
-                      <td className="p-4 text-right">
-                        <span className={`inline-block px-3.5 py-1.5 rounded-xl font-bold border cursor-pointer transition-colors ${isDark ? 'bg-blue-950 text-blue-300 border-blue-800' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>Inspect Details &rarr;</span>
+                      <td className={`p-5 font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {v.intake_cost?.toLocaleString()}</td>
+                      <td className="p-5 text-right">
+                        <span className={`inline-block px-3.5 py-1.5 rounded-xl font-bold border ${isDark ? 'bg-blue-950 text-blue-300 border-blue-800' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>Inspect Details &rarr;</span>
                       </td>
                     </tr>
                   ))}
@@ -871,17 +862,17 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
                 {/* Mobile card list — tap the card to open the vehicle */}
                 <div className="md:hidden space-y-3">
                   {vehicles.map((v) => (
-                    <div key={v.id} onClick={() => setSelectedVehicle(v)} className={`border rounded-2xl p-4 flex flex-col gap-3 cursor-pointer active:scale-[0.99] transition-transform ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                    <div key={v.id} onClick={() => setSelectedVehicle(v)} className={`border rounded-2xl p-5 flex flex-col gap-3 cursor-pointer active:scale-[0.99] transition-transform ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-bold text-blue-400">{v.plate_number}</span>
+                        <span className="text-base font-bold text-blue-400">{v.plate_number}</span>
                         <StatusBadge status={v.status} />
                       </div>
-                      <div className={`text-xs space-y-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      <div className={`text-sm space-y-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                         <p className="font-semibold">{v.make_model_year}</p>
                         <p>Insurance: {v.insurance_panel || 'N/A'}</p>
                         <div className="flex items-center justify-between pt-1">
-                          <p className="font-bold text-white">RM {v.intake_cost?.toLocaleString()}</p>
-                          <span className={`text-xs font-extrabold ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>View Details ›</span>
+                          <p className={`font-black text-base ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {v.intake_cost?.toLocaleString()}</p>
+                          <span className={`text-sm font-extrabold ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>View Details ›</span>
                         </div>
                       </div>
                     </div>

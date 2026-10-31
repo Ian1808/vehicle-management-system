@@ -130,6 +130,56 @@ export default function AdminModule() {
     const [activeTab, setActiveTab] = useState<'overview' | 'vehicles' | 'users' | 'companies' | 'banks' | 'scanlogs' | 'trash'>('overview')
     // Accordion: when true, all section cards are collapsed and no content shows.
     const [collapsed, setCollapsed] = useState(false)
+    // Customizable sections: reorder + hide, persisted to localStorage.
+    const [sectionOrder, setSectionOrder] = useState<string[]>(() => TABS.map(t => t.key))
+    const [hiddenSections, setHiddenSections] = useState<string[]>([])
+    const [customizeOpen, setCustomizeOpen] = useState(false)
+
+    // Load saved section layout once.
+    useEffect(() => {
+        const saved = window.localStorage.getItem('vms_admin_sections')
+        if (!saved) return
+        try {
+            const parsed = JSON.parse(saved)
+            const validKeys = TABS.map(t => t.key)
+            if (Array.isArray(parsed.order)) {
+                const order = parsed.order.filter((k: string) => (validKeys as string[]).includes(k))
+                if (order.length) setSectionOrder(order)
+            }
+            if (Array.isArray(parsed.hidden)) {
+                setHiddenSections(parsed.hidden.filter((k: string) => (validKeys as string[]).includes(k)))
+            }
+        } catch {
+            // Ignore corrupted saved layout and fall back to defaults.
+        }
+    }, [])
+
+    // Persist layout on any change.
+    useEffect(() => {
+        window.localStorage.setItem('vms_admin_sections', JSON.stringify({ order: sectionOrder, hidden: hiddenSections }))
+    }, [sectionOrder, hiddenSections])
+
+    const visibleTabs = sectionOrder.filter(k => !hiddenSections.includes(k))
+
+    function moveSection(key: string, dir: -1 | 1) {
+        setSectionOrder(prev => {
+            const idx = prev.indexOf(key)
+            const target = idx + dir
+            if (idx === -1 || target < 0 || target >= prev.length) return prev
+            const next = [...prev]
+            ;[next[idx], next[target]] = [next[target], next[idx]]
+            return next
+        })
+    }
+
+    function toggleSectionHidden(key: string) {
+        setHiddenSections(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
+    }
+
+    function resetSectionLayout() {
+        setSectionOrder(TABS.map(t => t.key))
+        setHiddenSections([])
+    }
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [deletedVehicles, setDeletedVehicles] = useState<Vehicle[]>([])
     const [banks, setBanks] = useState<AdminBankRow[]>([])
@@ -903,6 +953,84 @@ export default function AdminModule() {
 
             <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} onNavigate={(index) => setPreviewMedia(prev => (prev ? { ...prev, index } : prev))} isDark={isDark} />
 
+            {/* Customize Sections Modal */}
+            {customizeOpen && (
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                    <div className={`border rounded-3xl shadow-2xl max-w-md w-full p-6 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
+                        <div className="flex items-center justify-between gap-3 mb-1">
+                            <h3 className="text-base font-extrabold">⚙️ Customize Sections</h3>
+                            <button
+                                onClick={() => setCustomizeOpen(false)}
+                                className={`shrink-0 rounded-full w-8 h-8 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
+                            >
+                                &times;
+                            </button>
+                        </div>
+                        <p className={`text-xs mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Reorder or hide sections in your Admin Hub. Changes save automatically.</p>
+
+                        <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+                            {sectionOrder.map((key, idx) => {
+                                const tab = TABS.find(t => t.key === key)!
+                                const hidden = hiddenSections.includes(key)
+                                const isFirst = idx === 0
+                                const isLast = idx === sectionOrder.length - 1
+                                return (
+                                    <div key={key} className={`flex items-center justify-between gap-3 rounded-xl border px-3.5 py-3 transition-opacity ${hidden ? 'opacity-45' : ''} ${isDark ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50'}`}>
+                                        <span className="flex items-center gap-2 text-sm font-bold min-w-0 truncate">
+                                            <span className="text-base leading-none shrink-0">{tab.icon}</span>
+                                            <span className="truncate">{tab.short}</span>
+                                            {hidden && <span className={`shrink-0 text-[10px] font-bold uppercase px-2 py-0.5 rounded-md ${isDark ? 'bg-slate-800 text-slate-400' : 'bg-slate-200 text-slate-500'}`}>Hidden</span>}
+                                        </span>
+                                        <div className="flex items-center gap-1.5 shrink-0">
+                                            <button
+                                                onClick={() => moveSection(key, -1)}
+                                                disabled={isFirst}
+                                                title="Move up"
+                                                className={`w-8 h-8 rounded-lg text-sm font-black transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'}`}
+                                            >
+                                                ↑
+                                            </button>
+                                            <button
+                                                onClick={() => moveSection(key, 1)}
+                                                disabled={isLast}
+                                                title="Move down"
+                                                className={`w-8 h-8 rounded-lg text-sm font-black transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'}`}
+                                            >
+                                                ↓
+                                            </button>
+                                            <button
+                                                onClick={() => toggleSectionHidden(key)}
+                                                title={hidden ? 'Show section' : 'Hide section'}
+                                                className={`px-3 h-8 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${hidden
+                                                    ? (isDark ? 'bg-purple-950 text-purple-300 hover:bg-purple-900 border border-purple-800' : 'bg-purple-50 text-purple-600 hover:bg-purple-100 border border-purple-200')
+                                                    : (isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600')}`}
+                                            >
+                                                {hidden ? '👁 Show' : '🙈 Hide'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+
+                        <div className={`flex items-center justify-between gap-3 pt-5 border-t mt-4 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                            <button
+                                onClick={resetSectionLayout}
+                                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
+                            >
+                                ↺ Reset to default
+                            </button>
+                            <button
+                                onClick={() => setCustomizeOpen(false)}
+                                className="px-5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white transition-colors cursor-pointer shadow-md"
+                            >
+                                Done
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Add Staff User Modal */}
             {showUserModal && (
                 <StaffUserModal
@@ -936,9 +1064,22 @@ export default function AdminModule() {
             )}
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+                {/* Section picker header — customizable layout */}
+                <div className="mb-3 flex items-center justify-between gap-2">
+                    <span className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Admin Hub Sections</span>
+                    <button
+                        type="button"
+                        onClick={() => setCustomizeOpen(true)}
+                        className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold border cursor-pointer transition-colors ${isDark ? 'bg-slate-900 hover:bg-slate-800 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-50 text-purple-600 border-slate-200'}`}
+                    >
+                        ⚙️ Customize
+                    </button>
+                </div>
+
                 {/* Section picker — compact cards, click to expand (accordion) */}
-                <div className="mb-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2.5">
-                    {TABS.map((tab) => {
+                <div className="mb-6 grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-2.5">
+                    {visibleTabs.map((key) => {
+                        const tab = TABS.find(t => t.key === key)!
                         const open = activeTab === tab.key && !collapsed
                         return (
                             <button

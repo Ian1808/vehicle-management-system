@@ -1,5 +1,7 @@
 "use client"
 
+import { useState, useEffect } from 'react'
+
 export type PreviewItem = { url: string; title: string }
 export type PreviewState = { items: PreviewItem[]; index: number } | null
 
@@ -11,13 +13,24 @@ type PreviewModalProps = {
     isDark: boolean
 }
 
+const ZOOM_LEVELS = [1, 1.5, 2, 3, 4]
+
 export default function PreviewModal({ preview, onClose, onDownload, onNavigate, isDark }: PreviewModalProps) {
+    const [zoomIdx, setZoomIdx] = useState(0)
+
+    // Reset zoom whenever a different item is shown.
+    useEffect(() => {
+        setZoomIdx(0)
+    }, [preview?.index])
+
     if (!preview) return null
 
     const item = preview.items[preview.index]
     const count = preview.items.length
     const canPrev = count > 1 && preview.index > 0
     const canNext = count > 1 && preview.index < count - 1
+    const zoom = ZOOM_LEVELS[zoomIdx]
+    const isPdf = item.url.includes('.pdf')
 
     return (
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -53,14 +66,27 @@ export default function PreviewModal({ preview, onClose, onDownload, onNavigate,
                             ‹
                         </button>
                     )}
-                    {item.url.includes('.pdf') ? (
+                    {isPdf ? (
                         <iframe src={item.url} className="w-full h-[60vh] rounded-xl border-0" title={item.title} />
-                    ) : (
+                    ) : zoom === 1 ? (
                         <img
                             src={item.url}
                             alt={item.title}
-                            className="max-h-[60vh] max-w-full w-auto object-contain rounded-xl shadow-md"
+                            onClick={() => setZoomIdx(1)}
+                            title="Click to zoom in"
+                            className="max-h-[60vh] max-w-full w-auto object-contain rounded-xl shadow-md cursor-zoom-in"
                         />
+                    ) : (
+                        <div className="w-full h-[60vh] overflow-auto rounded-xl bg-slate-950/50">
+                            <img
+                                src={item.url}
+                                alt={item.title}
+                                onClick={() => setZoomIdx(0)}
+                                title="Click to reset zoom"
+                                style={{ width: `${zoom * 100}%`, maxWidth: 'none', height: 'auto' }}
+                                className="rounded-xl cursor-zoom-out"
+                            />
+                        </div>
                     )}
                     {canNext && (
                         <button
@@ -73,6 +99,43 @@ export default function PreviewModal({ preview, onClose, onDownload, onNavigate,
                         </button>
                     )}
                 </div>
+
+                {!isPdf && (
+                    <div className={`flex flex-wrap items-center justify-center gap-2 -mt-2 mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                        <button
+                            onClick={() => setZoomIdx(Math.max(0, zoomIdx - 1))}
+                            disabled={zoomIdx === 0}
+                            title="Zoom out"
+                            className={`w-8 h-8 rounded-full text-sm font-black transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                                }`}
+                        >
+                            −
+                        </button>
+                        <span className={`text-[11px] font-bold px-2 py-1 rounded-lg border ${isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-600'}`}>
+                            {Math.round(zoom * 100)}%
+                        </span>
+                        <button
+                            onClick={() => setZoomIdx(Math.min(ZOOM_LEVELS.length - 1, zoomIdx + 1))}
+                            disabled={zoomIdx === ZOOM_LEVELS.length - 1}
+                            title="Zoom in"
+                            className={`w-8 h-8 rounded-full text-sm font-black transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                                }`}
+                        >
+                            +
+                        </button>
+                        {zoomIdx > 0 && (
+                            <button
+                                onClick={() => setZoomIdx(0)}
+                                title="Reset to fit"
+                                className={`px-3 h-8 rounded-full text-[11px] font-bold transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                                    }`}
+                            >
+                                ⟲ Fit
+                            </button>
+                        )}
+                        <span className={`text-[10px] font-semibold ml-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Click photo to toggle zoom · drag scroll to pan</span>
+                    </div>
+                )}
 
                 <div className={`flex flex-wrap justify-end gap-3 pt-2 border-t ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
                     <button
