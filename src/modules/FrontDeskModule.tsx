@@ -53,6 +53,15 @@ type PreviewState = { items: { url: string; title: string }[]; index: number } |
 
 const DOCUMENT_CATEGORIES = ['grant', 'jpj', 'insurance', 'ber'] as const
 
+const STATUS_STEPS: { key: string; label: string; short: string }[] = [
+  { key: 'intake', label: 'Intake', short: 'Intake' },
+  { key: 'pending_before_photos', label: 'Before Photos', short: 'Before' },
+  { key: 'in_repair', label: 'In Repair', short: 'Repair' },
+  { key: 'pending_after_photos', label: 'After Photos', short: 'After' },
+  { key: 'completed', label: 'Completed', short: 'Done' },
+  { key: 'road_ready', label: 'Road Ready', short: 'Ready' },
+]
+
 function documentLabel(category: string): string {
   return category === 'grant' ? 'Vehicle Grant (VOC)' : category === 'jpj' ? 'JPJ Inspection' : category === 'insurance' ? 'Insurance' : 'BER Form'
 }
@@ -78,6 +87,8 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
   const [toast, setToast] = useState<ToastState>(null)
   const [confirmModal, setConfirmModal] = useState<ConfirmState>(null)
   const [previewMedia, setPreviewMedia] = useState<PreviewState>(null)
+  const [detailTab, setDetailTab] = useState<'overview' | 'documents' | 'photos' | 'workshop'>('overview')
+  const [photoFilter, setPhotoFilter] = useState<'before' | 'after' | 'additional'>('before')
   const { isDark } = useTheme()
 
   // User State
@@ -162,6 +173,8 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
   useEffect(() => {
     async function loadMedia() {
       if (selectedVehicle) {
+        setDetailTab('overview')
+        setPhotoFilter('before')
         try {
           const media = await fetchVehicleMedia(selectedVehicle.id)
           setMediaItems(media)
@@ -413,6 +426,17 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
 
   const innerCard = isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'
 
+  const docCount = mediaItems.filter(m => m.media_type === 'document').length
+  const beforePhotos = mediaItems.filter(m => m.media_type === 'photo_before')
+  const afterPhotos = mediaItems.filter(m => m.media_type === 'photo_after')
+  const photoCount = beforePhotos.length + afterPhotos.length
+  const visiblePhotoFilters = [
+    ...(showBefore ? [{ key: 'before' as const, label: 'Before Repair', count: beforePhotos.length }] : []),
+    ...(showAfter ? [{ key: 'after' as const, label: 'After Repair', count: afterPhotos.length }] : []),
+    ...(showAdditional ? [{ key: 'additional' as const, label: 'Additional', count: additionalPhotos.length }] : []),
+  ]
+  const activePhotoFilter = visiblePhotoFilters.some(f => f.key === photoFilter) ? photoFilter : (visiblePhotoFilters[0]?.key ?? 'before')
+
   return (
     <div className={`min-h-screen ${embedded ? '' : 'pb-24 lg:pb-0 '}${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
       {toast && <Toast message={toast.message} type={toast.type} isDark={isDark} />}
@@ -429,23 +453,18 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
       )}
       <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} onNavigate={(index) => setPreviewMedia(prev => (prev ? { ...prev, index } : prev))} isDark={isDark} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24 lg:pb-8">
         {selectedVehicle ? (
           <div>
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <button onClick={() => { setSelectedVehicle(null); const url = new URL(window.location.href); url.searchParams.delete('vehicle'); window.history.replaceState(null, '', url.pathname + url.search) }} className={`text-xs font-bold px-3.5 py-2 rounded-xl border cursor-pointer ${isDark ? 'border-slate-800 bg-slate-950 text-blue-400' : 'border-slate-200 bg-white text-blue-600'}`}>
                 &larr; Back to Registry
               </button>
-
-              {selectedVehicle.status === 'intake' && (
-                <button onClick={handleSendToWorkshop} className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all cursor-pointer flex items-center gap-2">
-                  <span>➡️ Proceed to Pending Before Photos</span>
-                </button>
-              )}
             </div>
 
             <Card isDark={isDark} className="p-5 sm:p-8 mb-8 shadow-2xl">
-              <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              {/* Vehicle header */}
+              <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                 <div>
                   <div className="flex flex-wrap items-center gap-3">
                     <h2 className={`text-2xl sm:text-3xl font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedVehicle.plate_number}</h2>
@@ -462,91 +481,110 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
                 </div>
               </div>
 
-              <div className={`grid grid-cols-1 md:grid-cols-3 gap-5 py-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                <div className={`p-5 rounded-2xl border ${innerCard}`}>
-                  <p className="text-[11px] font-bold text-slate-400 uppercase">Intake Cost</p>
-                  <p className={`text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.intake_cost?.toLocaleString()}</p>
-                </div>
-                <div className={`p-5 rounded-2xl border ${innerCard}`}>
-                  <p className="text-[11px] font-bold text-slate-400 uppercase">Market Value</p>
-                  <p className={`text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.market_value?.toLocaleString()}</p>
-                </div>
-                <div className={`p-5 rounded-2xl border ${innerCard}`}>
-                  <p className="text-[11px] font-bold text-slate-400 uppercase">Total Repair Cost</p>
-                  <p className={`text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.repair_cost?.toLocaleString()}</p>
-                </div>
+              {/* Detail tabs */}
+              <div className="flex flex-wrap gap-2 pt-5 -mb-px">
+                {([
+                  { key: 'overview' as const, label: '📋 Overview', badge: 0 },
+                  { key: 'documents' as const, label: '📄 Documents', badge: docCount },
+                  { key: 'photos' as const, label: '📷 Photos', badge: photoCount },
+                  { key: 'workshop' as const, label: '🔧 Workshop', badge: 0 },
+                ]).map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setDetailTab(tab.key)}
+                    className={`shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold border cursor-pointer transition-colors ${detailTab === tab.key ? 'bg-blue-600 text-white border-blue-600' : isDark ? 'border-slate-700 bg-slate-900 text-slate-400 hover:text-white' : 'border-slate-200 bg-white text-slate-600 hover:text-slate-900'}`}
+                  >
+                    <span>{tab.label}</span>
+                    {tab.badge > 0 && (
+                      <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${detailTab === tab.key ? 'bg-white/20 text-white' : isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>{tab.badge}</span>
+                    )}
+                  </button>
+                ))}
               </div>
 
-              {/* Mandatory Documents Section */}
-              <div className={`pt-6 pb-8 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                <h3 className={`text-sm font-extrabold mb-4 tracking-wider uppercase ${isDark ? 'text-white' : 'text-slate-900'}`}>1. Mandatory Document Management</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {DOCUMENT_CATEGORIES.map((cat) => {
-                    const doc = mediaItems.find(m => m.media_type === 'document' && m.category === cat)
-                    return (
-                      <div key={cat} className={`border rounded-2xl p-5 flex flex-col justify-between ${innerCard}`}>
-                        <div>
-                          <p className={`text-xs font-extrabold uppercase mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{documentLabel(cat)}</p>
-                          <p className={`text-xs font-semibold mb-5 ${doc ? 'text-emerald-400' : 'text-slate-500'}`}>{doc ? '✓ Verified & Stored' : 'Pending Upload'}</p>
-                        </div>
-                        {doc ? (
-                          <div className="flex gap-2">
-                            <button onClick={() => setPreviewMedia({ items: [{ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${documentLabel(cat)}` }], index: 0 })} className={`w-1/2 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-blue-950 text-blue-300 hover:bg-blue-900 border-blue-800' : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200'}`}>View</button>
-                            <button onClick={() => requestDeleteDocument(cat)} className={`w-1/2 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 text-rose-300 hover:bg-rose-900 border-rose-900' : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-200'}`}>Remove</button>
-                          </div>
-                        ) : (
-                          <div>
-                            <label htmlFor={`file-${cat}`} className="w-full block text-center bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow-md">
-                              {uploadingCategory === cat ? 'Uploading…' : 'Upload File'}
-                            </label>
-                            <input id={`file-${cat}`} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => handleFileSelect(e, cat)} />
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {/* Third-Party Work Assignments Section */}
-              <div className={`pt-8 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                <ThirdPartyAssignmentPanel
-                  isDark={isDark}
-                  vehicleId={selectedVehicle.id}
-                  vehiclePlate={selectedVehicle.plate_number}
-                  companyId={userCompanyId}
-                  isAdmin={userRole === 'admin'}
-                  showToast={showToast}
-                />
-              </div>
-
-              {/* Technician Photo Evidence Section */}
-              {(showBefore || showAfter) && (
-                <div className="pt-8">
-                  <h3 className={`text-sm font-extrabold tracking-wider uppercase mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>2. Technician Photo Evidence (Read-Only)</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {PHOTO_CATEGORIES.map((cat) => {
-                      const before = mediaItems.find(m => m.media_type === 'photo_before' && m.category === cat.key)
-                      const after = mediaItems.find(m => m.media_type === 'photo_after' && m.category === cat.key)
+              {/* --- Overview tab --- */}
+              {detailTab === 'overview' && (
+                <div className="pt-5">
+                  <div className="flex items-center gap-0.5 sm:gap-1 overflow-x-auto pb-2">
+                    {STATUS_STEPS.map((step, i) => {
+                      const currentIdx = STATUS_STEPS.findIndex(s => s.key === selectedVehicle.status)
+                      const done = currentIdx > i
+                      const current = currentIdx === i
                       return (
-                        <div key={cat.key} className={`border rounded-2xl p-4 ${isDark ? 'border-slate-800 bg-slate-900/70' : 'border-slate-200 bg-slate-50'}`}>
-                          <p className={`text-xs font-extrabold uppercase mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>{cat.label}</p>
-                          <div className={`grid gap-3 ${showBefore && showAfter ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                            {showBefore && (
-                              <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
-                                <p className="text-[10px] font-bold uppercase text-amber-400 mb-1">Before Repair</p>
-                                <p className={`text-[11px] mb-3 ${before ? 'text-emerald-400' : 'text-slate-500'}`}>{before ? '✓ Captured' : 'Pending'}</p>
-                                {before && <PhotoThumb url={before.file_url} alt={`${selectedVehicle.plate_number} - ${cat.label} (Before)`} onClick={() => openPhaseGallery('photo_before', before.file_url)} className="h-24" />}
-                              </div>
-                            )}
-                            {showAfter && (
-                              <div className={`border rounded-xl p-3 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
-                                <p className="text-[10px] font-bold uppercase text-blue-400 mb-1">After Repair</p>
-                                <p className={`text-[11px] mb-3 ${after ? 'text-blue-400' : 'text-slate-500'}`}>{after ? '✓ Captured' : 'Pending'}</p>
-                                {after && <PhotoThumb url={after.file_url} alt={`${selectedVehicle.plate_number} - ${cat.label} (After)`} onClick={() => openPhaseGallery('photo_after', after.file_url)} className="h-24" />}
-                              </div>
-                            )}
+                        <div key={step.key} className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+                          {i > 0 && <div className={`h-0.5 w-1 sm:w-5 ${done || current ? (isDark ? 'bg-emerald-500' : 'bg-emerald-400') : (isDark ? 'bg-slate-700' : 'bg-slate-300')}`} />}
+                          <span className={`px-1.5 sm:px-2.5 py-1 rounded-full text-[9px] sm:text-[10px] font-extrabold whitespace-nowrap ${done ? (isDark ? 'bg-emerald-900/60 text-emerald-300' : 'bg-emerald-100 text-emerald-700') : current ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-800 text-slate-500' : 'bg-slate-100 text-slate-400'}`}>
+                            {done ? '✓ ' : ''}<span className="hidden sm:inline">{step.label}</span><span className="sm:hidden">{step.short}</span>
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* Status-driven next step */}
+                  <div className={`mt-4 rounded-2xl border p-5 ${isDark ? 'border-slate-800 bg-slate-900/70' : 'border-slate-200 bg-slate-50'}`}>
+                    <p className="text-[10px] uppercase font-extrabold tracking-wider text-slate-400 mb-1">Next Step</p>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <p className={`text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                        {selectedVehicle.status === 'intake' && `Complete the mandatory documents (${docCount}/4 on file) before sending the vehicle to the workshop.`}
+                        {selectedVehicle.status === 'pending_before_photos' && `Waiting for the technician to capture the Before photos (${beforePhotos.length}/8 done).`}
+                        {selectedVehicle.status === 'in_repair' && 'Vehicle is in repair — After photos are next in the workflow.'}
+                        {selectedVehicle.status === 'pending_after_photos' && `Waiting for the technician to capture the After photos (${afterPhotos.length}/8 done).`}
+                        {(selectedVehicle.status === 'completed' || selectedVehicle.status === 'road_ready') && 'Repair complete — all photo evidence and documents are archived.'}
+                        {!['intake', 'pending_before_photos', 'in_repair', 'pending_after_photos', 'completed', 'road_ready'].includes(selectedVehicle.status) && 'Managing this vehicle.'}
+                      </p>
+                      {selectedVehicle.status === 'intake' && (
+                        <button onClick={handleSendToWorkshop} className="shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all cursor-pointer">
+                          ➡️ Proceed to Pending Before Photos
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Costs */}
+                  <div className={`grid grid-cols-3 gap-2 sm:gap-5 mt-6`}>
+                    <div className={`p-3 sm:p-5 rounded-2xl border ${innerCard}`}>
+                      <p className="text-[9px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wide"><span className="hidden sm:inline">Intake Cost</span><span className="sm:hidden">Intake</span></p>
+                      <p className={`text-lg sm:text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.intake_cost?.toLocaleString()}</p>
+                    </div>
+                    <div className={`p-3 sm:p-5 rounded-2xl border ${innerCard}`}>
+                      <p className="text-[9px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wide"><span className="hidden sm:inline">Market Value</span><span className="sm:hidden">Market</span></p>
+                      <p className={`text-lg sm:text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.market_value?.toLocaleString()}</p>
+                    </div>
+                    <div className={`p-3 sm:p-5 rounded-2xl border ${innerCard}`}>
+                      <p className="text-[9px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wide"><span className="hidden sm:inline">Total Repair Cost</span><span className="sm:hidden">Repair</span></p>
+                      <p className={`text-lg sm:text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.repair_cost?.toLocaleString()}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* --- Documents tab --- */}
+              {detailTab === 'documents' && (
+                <div className="pt-6">
+                  <h3 className={`text-sm font-extrabold mb-4 tracking-wider uppercase ${isDark ? 'text-white' : 'text-slate-900'}`}>Mandatory Document Management</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {DOCUMENT_CATEGORIES.map((cat) => {
+                      const doc = mediaItems.find(m => m.media_type === 'document' && m.category === cat)
+                      return (
+                        <div key={cat} className={`border rounded-2xl p-5 flex flex-col justify-between ${innerCard}`}>
+                          <div>
+                            <p className={`text-xs font-extrabold uppercase mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{documentLabel(cat)}</p>
+                            <p className={`text-xs font-semibold mb-5 ${doc ? 'text-emerald-400' : 'text-slate-500'}`}>{doc ? '✓ Verified & Stored' : 'Pending Upload'}</p>
                           </div>
+                          {doc ? (
+                            <div className="flex gap-2">
+                              <button onClick={() => setPreviewMedia({ items: [{ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${documentLabel(cat)}` }], index: 0 })} className={`w-1/2 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-blue-950 text-blue-300 hover:bg-blue-900 border-blue-800' : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200'}`}>View</button>
+                              <button onClick={() => requestDeleteDocument(cat)} className={`w-1/2 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 text-rose-300 hover:bg-rose-900 border-rose-900' : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-200'}`}>Remove</button>
+                            </div>
+                          ) : (
+                            <div>
+                              <label htmlFor={`file-${cat}`} className="w-full block text-center bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow-md">
+                                {uploadingCategory === cat ? 'Uploading…' : 'Upload File'}
+                              </label>
+                              <input id={`file-${cat}`} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => handleFileSelect(e, cat)} />
+                            </div>
+                          )}
                         </div>
                       )
                     })}
@@ -554,25 +592,96 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
                 </div>
               )}
 
-              {/* Additional Evidence Photos Section */}
-              {showAdditional && (
-                <div className={`pt-8 mt-8 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                  <h3 className={`text-sm font-extrabold tracking-wider uppercase mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>3. Additional Evidence Photos (Read-Only)</h3>
-                  {additionalPhotos.length === 0 ? (
-                    <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No additional photos uploaded by technician.</p>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                      {additionalPhotos.map((item) => (
-                        <div key={item.id} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'border-slate-800 bg-slate-900/70' : 'border-slate-200 bg-slate-50'}`}>
-                          <div>
-                            <p className={`text-xs font-extrabold uppercase mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{additionalLabel(item.category)}</p>
-                            <p className="text-[11px] font-semibold text-purple-400 mb-3">✓ Captured</p>
-                          </div>
-                          <PhotoThumb url={item.file_url} alt={`${selectedVehicle.plate_number} - ${additionalLabel(item.category)} (Additional)`} onClick={() => openAdditionalGallery(item.file_url)} className="h-24" />
+              {/* --- Photos tab --- */}
+              {detailTab === 'photos' && (
+                <div className="pt-6">
+                  <h3 className={`text-sm font-extrabold tracking-wider uppercase mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>Technician Photo Evidence (Read-Only)</h3>
+
+                  <div className="flex gap-2 flex-wrap">
+                    {visiblePhotoFilters.map(f => (
+                      <button
+                        key={f.key}
+                        onClick={() => setPhotoFilter(f.key)}
+                        className={`px-4 py-2 rounded-xl text-xs font-extrabold border cursor-pointer transition-colors ${activePhotoFilter === f.key ? 'bg-blue-600 text-white border-blue-600' : isDark ? 'border-slate-700 bg-slate-900 text-slate-400 hover:text-white' : 'border-slate-200 bg-white text-slate-600 hover:text-slate-900'}`}
+                      >
+                        {f.label} · {f.count}
+                      </button>
+                    ))}
+                  </div>
+
+                  {activePhotoFilter === 'before' && (
+                    <div className="mt-4">
+                      {beforePhotos.length === 0 ? (
+                        <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No Before photos captured yet.</p>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                          {beforePhotos.map((item) => {
+                            const cat = PHOTO_CATEGORIES.find(c => c.key === item.category)
+                            return (
+                              <div key={item.id} className={`border rounded-2xl p-3 flex flex-col justify-between ${innerCard}`}>
+                                <p className={`text-[10px] font-extrabold uppercase mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>{cat?.label ?? item.category}</p>
+                                <PhotoThumb url={item.file_url} alt={`${selectedVehicle.plate_number} - ${cat?.label ?? item.category} (Before)`} onClick={() => openPhaseGallery('photo_before', item.file_url)} className="h-24" />
+                              </div>
+                            )
+                          })}
                         </div>
-                      ))}
+                      )}
                     </div>
                   )}
+
+                  {activePhotoFilter === 'after' && (
+                    <div className="mt-4">
+                      {afterPhotos.length === 0 ? (
+                        <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No After photos captured yet.</p>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                          {afterPhotos.map((item) => {
+                            const cat = PHOTO_CATEGORIES.find(c => c.key === item.category)
+                            return (
+                              <div key={item.id} className={`border rounded-2xl p-3 flex flex-col justify-between ${innerCard}`}>
+                                <p className={`text-[10px] font-extrabold uppercase mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>{cat?.label ?? item.category}</p>
+                                <PhotoThumb url={item.file_url} alt={`${selectedVehicle.plate_number} - ${cat?.label ?? item.category} (After)`} onClick={() => openPhaseGallery('photo_after', item.file_url)} className="h-24" />
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {activePhotoFilter === 'additional' && (
+                    <div className="mt-4">
+                      {additionalPhotos.length === 0 ? (
+                        <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No additional photos uploaded by technician.</p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                          {additionalPhotos.map((item) => (
+                            <div key={item.id} className={`border rounded-2xl p-4 flex flex-col justify-between ${innerCard}`}>
+                              <div>
+                                <p className={`text-xs font-extrabold uppercase mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{additionalLabel(item.category)}</p>
+                                <p className="text-[11px] font-semibold text-purple-400 mb-3">✓ Captured</p>
+                              </div>
+                              <PhotoThumb url={item.file_url} alt={`${selectedVehicle.plate_number} - ${additionalLabel(item.category)} (Additional)`} onClick={() => openAdditionalGallery(item.file_url)} className="h-24" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* --- Workshop tab --- */}
+              {detailTab === 'workshop' && (
+                <div className="pt-6">
+                  <ThirdPartyAssignmentPanel
+                    isDark={isDark}
+                    vehicleId={selectedVehicle.id}
+                    vehiclePlate={selectedVehicle.plate_number}
+                    companyId={userCompanyId}
+                    isAdmin={userRole === 'admin'}
+                    showToast={showToast}
+                  />
                 </div>
               )}
             </Card>
@@ -614,7 +723,7 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
                 </thead>
                 <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
                   {vehicles.map((v) => (
-                    <tr key={v.id} className={`transition-colors ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
+                    <tr key={v.id} onClick={() => setSelectedVehicle(v)} className={`transition-colors cursor-pointer ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
                       <td className="p-4 font-bold text-sm text-blue-400">{v.plate_number}</td>
                       <td className="p-4">{v.make_model_year}</td>
                       <td className="p-4 text-slate-400">{v.insurance_panel || 'N/A'}</td>
@@ -623,7 +732,7 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
                       </td>
                       <td className={`p-4 font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {v.intake_cost?.toLocaleString()}</td>
                       <td className="p-4 text-right">
-                        <button onClick={() => setSelectedVehicle(v)} className={`px-3.5 py-1.5 rounded-xl font-bold border cursor-pointer transition-colors ${isDark ? 'bg-blue-950 text-blue-300 border-blue-800 hover:bg-blue-900' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}>Inspect Details &rarr;</button>
+                        <span className={`inline-block px-3.5 py-1.5 rounded-xl font-bold border cursor-pointer transition-colors ${isDark ? 'bg-blue-950 text-blue-300 border-blue-800' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>Inspect Details &rarr;</span>
                       </td>
                     </tr>
                   ))}
@@ -631,10 +740,10 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
               </ResponsiveTable>
                 </div>
 
-                {/* Mobile card list */}
+                {/* Mobile card list — tap the card to open the vehicle */}
                 <div className="md:hidden space-y-3">
                   {vehicles.map((v) => (
-                    <div key={v.id} className={`border rounded-2xl p-4 flex flex-col gap-3 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                    <div key={v.id} onClick={() => setSelectedVehicle(v)} className={`border rounded-2xl p-4 flex flex-col gap-3 cursor-pointer active:scale-[0.99] transition-transform ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-sm font-bold text-blue-400">{v.plate_number}</span>
                         <StatusBadge status={v.status} />
@@ -642,11 +751,11 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
                       <div className={`text-xs space-y-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                         <p className="font-semibold">{v.make_model_year}</p>
                         <p>Insurance: {v.insurance_panel || 'N/A'}</p>
-                        <p className="font-bold text-white">RM {v.intake_cost?.toLocaleString()}</p>
+                        <div className="flex items-center justify-between pt-1">
+                          <p className="font-bold text-white">RM {v.intake_cost?.toLocaleString()}</p>
+                          <span className={`text-xs font-extrabold ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>View Details ›</span>
+                        </div>
                       </div>
-                      <button onClick={() => setSelectedVehicle(v)} className={`w-full px-3.5 py-2.5 rounded-xl font-bold border cursor-pointer transition-colors text-xs ${isDark ? 'bg-blue-950 text-blue-300 border-blue-800 hover:bg-blue-900' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}>
-                        Inspect Details &rarr;
-                      </button>
                     </div>
                   ))}
                 </div>

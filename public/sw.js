@@ -1,7 +1,7 @@
 // Vehicle Management System — service worker
 // Strategy: cache-first for hashed static assets, network-first for pages/API,
 // with a basic cache fallback so the app shell survives short offline periods.
-const CACHE_VERSION = 'vms-v1'
+const CACHE_VERSION = 'vms-v2'
 const STATIC_CACHE = `${CACHE_VERSION}-static`
 const PAGE_CACHE = `${CACHE_VERSION}-pages`
 
