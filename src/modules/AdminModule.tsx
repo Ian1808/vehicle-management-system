@@ -98,13 +98,13 @@ type ScanLogEntry = {
 }
 
 const TABS = [
-    { key: 'overview', label: '📊 Central Overview' },
-    { key: 'vehicles', label: '🚗 Vehicle Master Registry' },
-    { key: 'users', label: '👥 Staff & User Management' },
-    { key: 'companies', label: '🏢 Companies' },
-    { key: 'banks', label: '🏦 Banks & Insurance' },
-    { key: 'scanlogs', label: '🔍 OCR Scan Scores' },
-    { key: 'trash', label: '🗑️ Trash / Recovery' },
+    { key: 'overview', icon: '📊', short: 'Overview', title: 'Central Overview' },
+    { key: 'vehicles', icon: '🚗', short: 'Vehicles', title: 'Vehicle Master Registry' },
+    { key: 'users', icon: '👥', short: 'Users', title: 'Staff & User Management' },
+    { key: 'companies', icon: '🏢', short: 'Companies', title: 'Companies' },
+    { key: 'banks', icon: '🏦', short: 'Banks', title: 'Banks & Insurance' },
+    { key: 'scanlogs', icon: '🔍', short: 'Scan Logs', title: 'OCR Scan Scores' },
+    { key: 'trash', icon: '🗑️', short: 'Trash', title: 'Trash / Recovery' },
 ] as const
 
 // The Admin page is admin work only. To preview another module (manager,
@@ -128,6 +128,8 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function AdminModule() {
     const [activeTab, setActiveTab] = useState<'overview' | 'vehicles' | 'users' | 'companies' | 'banks' | 'scanlogs' | 'trash'>('overview')
+    // Accordion: when true, all section cards are collapsed and no content shows.
+    const [collapsed, setCollapsed] = useState(false)
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [deletedVehicles, setDeletedVehicles] = useState<Vehicle[]>([])
     const [banks, setBanks] = useState<AdminBankRow[]>([])
@@ -934,20 +936,54 @@ export default function AdminModule() {
             )}
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-                {/* Section selector */}
-                <div className="mb-6 flex items-center gap-2">
-                    <span className={`text-[11px] font-extrabold uppercase tracking-wider shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Section:</span>
-                    <select
-                        value={activeTab}
-                        onChange={(e) => { setActiveTab(e.target.value as 'overview' | 'vehicles' | 'users' | 'companies' | 'banks' | 'scanlogs' | 'trash'); setSelectedVehicle(null); }}
-                        className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl text-xs font-extrabold border cursor-pointer ${isDark ? 'bg-slate-950 text-white border-slate-700' : 'bg-white text-slate-800 border-slate-200 shadow-sm'}`}
-                    >
-                        {TABS.map((tab) => (
-                            <option key={tab.key} value={tab.key}>{tab.label} ({tabCounts[tab.key]})</option>
-                        ))}
-                    </select>
+                {/* Section picker — compact cards, click to expand (accordion) */}
+                <div className="mb-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2.5">
+                    {TABS.map((tab) => {
+                        const open = activeTab === tab.key && !collapsed
+                        return (
+                            <button
+                                key={tab.key}
+                                type="button"
+                                onClick={() => {
+                                    if (activeTab === tab.key) {
+                                        setCollapsed(!collapsed)
+                                    } else {
+                                        setActiveTab(tab.key)
+                                        setCollapsed(false)
+                                        setSelectedVehicle(null)
+                                    }
+                                }}
+                                className={`group rounded-xl border px-3 py-2.5 text-left transition-all cursor-pointer ${
+                                    open
+                                        ? 'bg-purple-600 border-purple-500 text-white shadow-md'
+                                        : isDark
+                                            ? 'bg-slate-900 border-slate-700 hover:border-purple-500 text-slate-200'
+                                            : 'bg-white border-slate-200 hover:border-purple-400 text-slate-700 shadow-sm'
+                                }`}
+                                title={`${tab.icon} ${tab.title} — click to expand`}
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="flex items-center gap-1.5 min-w-0">
+                                        <span className="text-base leading-none shrink-0">{tab.icon}</span>
+                                        <span className="text-[13px] font-extrabold truncate">{tab.short}</span>
+                                    </span>
+                                    <span className={`text-[10px] font-bold rounded-md px-1.5 py-0.5 shrink-0 ${open ? 'bg-white/20 text-white' : isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>{tabCounts[tab.key]}</span>
+                                </div>
+                                <div className={`mt-1.5 flex items-center justify-between text-[10px] font-semibold ${open ? 'text-purple-100' : isDark ? 'text-slate-400' : 'text-slate-400'}`}>
+                                    <span className="truncate">{open ? 'Click to collapse' : 'Click to expand'}</span>
+                                    <span className={`shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▾</span>
+                                </div>
+                            </button>
+                        )
+                    })}
                 </div>
 
+                {collapsed ? (
+                    <div className={`rounded-2xl border-2 border-dashed px-6 py-12 text-center text-xs font-semibold ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
+                        All sections are collapsed. Click a card above to open its contents.
+                    </div>
+                ) : (
+                    <>
                 {/* TAB 0: CENTRAL OVERVIEW */}
                 {activeTab === 'overview' && (
                     <div>
@@ -1770,6 +1806,8 @@ export default function AdminModule() {
                             </div>
                         )}
                     </div>
+                )}
+                    </>
                 )}
             </main>
         </div>

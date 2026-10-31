@@ -51,6 +51,8 @@ export default function MainDashboard() {
     const [role, setRole] = useState<Role | null>(null)
     const [state, setState] = useState<'loading' | 'ready' | 'denied'>('loading')
     const [tab, setTab] = useState<string>('')
+    // Manager module cards accordion: true = all modules collapsed to the card grid
+    const [modulesCollapsed, setModulesCollapsed] = useState(false)
     const { isDark, theme, setTheme } = useTheme()
     const [showSettingsModal, setShowSettingsModal] = useState(false)
     const [confirmSignOut, setConfirmSignOut] = useState(false)
@@ -127,6 +129,7 @@ export default function MainDashboard() {
 
     function selectTab(next: string) {
         setTab(next)
+        setModulesCollapsed(false)
         const url = new URL(window.location.href)
         url.searchParams.set('tab', next)
         window.history.replaceState(null, '', url.pathname + url.search)
@@ -277,20 +280,44 @@ export default function MainDashboard() {
                     </div>
                 </div>
                 {tabs.length > 1 && (
-                    <div className={`hidden lg:block border-t max-w-7xl mx-auto px-2 sm:px-6 py-2 flex items-center gap-2 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                        <span className={`text-[11px] font-extrabold uppercase tracking-wider mr-1 hidden sm:inline ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Modules:</span>
-                        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar flex-1 px-1 -mx-1">
-                            {tabs.map((key) => (
-                                <button
-                                    key={key}
-                                    onClick={() => selectTab(key)}
-                                    className={`shrink-0 whitespace-nowrap px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${tab === key
-                                        ? 'bg-purple-600 text-white shadow-lg'
-                                        : (isDark ? 'border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100')}`}
-                                >
-                                    {TAB_META[key].icon} {TAB_META[key].label}
-                                </button>
-                            ))}
+                    <div className={`hidden lg:block border-t max-w-7xl mx-auto px-3 sm:px-6 py-3 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                        {/* Module cards — compact, click to expand (accordion, same as Admin sections) */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-2.5">
+                            {tabs.map((key) => {
+                                const open = tab === key && !modulesCollapsed
+                                return (
+                                    <button
+                                        key={key}
+                                        type="button"
+                                        onClick={() => {
+                                            if (tab === key) {
+                                                setModulesCollapsed(!modulesCollapsed)
+                                            } else {
+                                                selectTab(key)
+                                            }
+                                        }}
+                                        className={`rounded-xl border px-3 py-2.5 text-left transition-all cursor-pointer ${
+                                            open
+                                                ? 'bg-purple-600 border-purple-500 text-white shadow-md'
+                                                : isDark
+                                                    ? 'bg-slate-900 border-slate-700 hover:border-purple-500 text-slate-200'
+                                                    : 'bg-white border-slate-200 hover:border-purple-400 text-slate-700 shadow-sm'
+                                        }`}
+                                        title={`${TAB_META[key].icon} ${TAB_META[key].label}`}
+                                    >
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="flex items-center gap-1.5 min-w-0">
+                                                <span className="text-base leading-none shrink-0">{TAB_META[key].icon}</span>
+                                                <span className="text-[13px] font-extrabold truncate">{MOBILE_TAB_LABELS[key] || TAB_META[key].label}</span>
+                                            </span>
+                                        </div>
+                                        <div className={`mt-1.5 flex items-center justify-between text-[10px] font-semibold ${open ? 'text-purple-100' : isDark ? 'text-slate-400' : 'text-slate-400'}`}>
+                                            <span className="truncate">{open ? 'Click to collapse' : 'Click to expand'}</span>
+                                            <span className={`shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▾</span>
+                                        </div>
+                                    </button>
+                                )
+                            })}
                         </div>
                     </div>
                 )}
@@ -316,12 +343,20 @@ export default function MainDashboard() {
                 </nav>
             )}
 
+            {modulesCollapsed ? (
+                <div className={`max-w-7xl mx-auto px-4 sm:px-6 py-6 rounded-2xl border-2 border-dashed mt-4 mb-4 text-center text-xs font-semibold ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
+                    All modules are collapsed. Click a card above to open one.
+                </div>
+            ) : (
+                <>
             {tab === 'admin' && <AdminModule />}
             {tab === 'manager' && <ManagerDashboardModule />}
             {tab === 'panels' && <ManagerPanelBanksModule />}
             {tab === 'staff' && <ManagerStaffModule />}
             {tab === 'frontdesk' && <FrontDeskModule />}
             {tab === 'technician' && <TechnicianModule />}
+                </>
+            )}
 
             {showSettingsModal && (
                 <AccountSettingsModal

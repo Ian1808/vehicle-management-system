@@ -9,16 +9,20 @@ import SectionHeading from '@/components/ui/SectionHeading'
 import EmptyState from '@/components/ui/EmptyState'
 import StatusBadge from '@/components/ui/StatusBadge'
 import CompanyNameModal from '@/components/ui/CompanyNameModal'
+import VehicleEditModal, { type VehicleEditPayload } from '@/components/admin/VehicleEditModal'
 
 type ToastState = { message: string; type: 'success' | 'error' } | null
 
 type CompanyVehicle = {
     id: string
     plate_number: string
+    chassis_number: string
     make_model_year: string
+    insurance_panel: string
     status: string
     intake_cost?: number | null
     market_value?: number | null
+    repair_cost?: number | null
 }
 
 type CompanyStaff = {
@@ -49,6 +53,7 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
     const [vehicles, setVehicles] = useState<CompanyVehicle[]>([])
     const [staff, setStaff] = useState<CompanyStaff[]>([])
     const [editCompanyOpen, setEditCompanyOpen] = useState(false)
+    const [editingVehicle, setEditingVehicle] = useState<CompanyVehicle | null>(null)
 
     const supabase = useMemo(() => createClient(), [])
 
@@ -57,11 +62,44 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
         setTimeout(() => setToast(null), 4000)
     }
 
+    // Manager edits vehicle details / costs for their own company's fleet.
+    // The list is already company-scoped, so updating by id stays inside the
+    // manager's own company. The DB unique constraint guards duplicate plates.
+    async function handleSaveVehicleEdit(payload: VehicleEditPayload): Promise<boolean> {
+        if (!editingVehicle) return false
+        try {
+            const { error } = await supabase
+                .from('vehicles')
+                .update({
+                    plate_number: payload.plate_number,
+                    chassis_number: payload.chassis_number,
+                    make_model_year: payload.make_model_year,
+                    insurance_panel: payload.insurance_panel,
+                    intake_cost: payload.intake_cost,
+                    market_value: payload.market_value,
+                    repair_cost: payload.repair_cost,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', editingVehicle.id)
+
+            if (error) throw error
+
+            showToast(`Vehicle ${payload.plate_number} updated successfully!`, 'success')
+            setEditingVehicle(null)
+            if (viewCompanyId) await loadCompanyData(viewCompanyId)
+            return true
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Failed to update vehicle'
+            showToast(msg.includes('duplicate key value violates unique constraint') ? 'Another vehicle already uses this plate or chassis number.' : msg, 'error')
+            return false
+        }
+    }
+
     async function loadCompanyData(companyId: string) {
         const [vehRes, staffRes] = await Promise.all([
             supabase
                 .from('vehicles')
-                .select('id, plate_number, make_model_year, status, intake_cost, market_value')
+                .select('id, plate_number, chassis_number, make_model_year, insurance_panel, status, intake_cost, market_value, repair_cost')
                 .eq('company_id', companyId)
                 .eq('is_deleted', false),
             supabase
@@ -334,12 +372,22 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                                             <p>Stage: {STATUS_FLOW_LABELS[v.status] || v.status}</p>
                                             <p>Intake: RM {Number(v.intake_cost || 0).toLocaleString()} · Market: RM {Number(v.market_value || 0).toLocaleString()}</p>
                                         </div>
-                                        <button
-                                            onClick={() => window.location.href = `/?tab=frontdesk&vehicle=${v.id}`}
-                                            className="mt-4 w-full bg-purple-600 hover:bg-purple-500 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                                        >
-                                            Open Vehicle →
-                                        </button>
+                                        <div className="mt-4 flex gap-2">
+                                            <button
+                                                onClick={() => window.location.href = `/?tab=frontdesk&vehicle=${v.id}`}
+                                                className="flex-1 bg-purple-600 hover:bg-purple-500 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                                            >
+                                                Open Vehicle →
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setEditingVehicle(v)}
+                                                className={`px-3 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-amber-700 border-slate-200'}`}
+                                                title="Edit vehicle details & costs"
+                                            >
+                                                ✏️
+                                            </button>
+                                        </div>
                                     </Card>
                                 ))}
                             </div>
@@ -356,6 +404,25 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                     accent="purple"
                     onSave={handleSaveCompanyName}
                     onClose={() => setEditCompanyOpen(false)}
+                />
+            )}
+
+            {editingVehicle && (
+                <VehicleEditModal
+                    key={editingVehicle.id}
+                    vehicle={{
+                        id: editingVehicle.id,
+                        plate_number: editingVehicle.plate_number,
+                        chassis_number: editingVehicle.chassis_number || '',
+                        make_model_year: editingVehicle.make_model_year,
+                        insurance_panel: editingVehicle.insurance_panel || '',
+                        intake_cost: Number(editingVehicle.intake_cost || 0),
+                        market_value: Number(editingVehicle.market_value || 0),
+                        repair_cost: Number(editingVehicle.repair_cost || 0),
+                    }}
+                    isDark={isDark}
+                    onClose={() => setEditingVehicle(null)}
+                    onSave={handleSaveVehicleEdit}
                 />
             )}
         </div>

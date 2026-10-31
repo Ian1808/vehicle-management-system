@@ -193,6 +193,7 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
     insurance_panel: string
     intake_cost: number
     market_value: number
+    repair_cost: number
     grantFile?: File | null
     ocrScan?: OcrScanPayload | null
     companyId?: string | null
