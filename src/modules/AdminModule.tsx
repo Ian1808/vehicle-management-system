@@ -22,11 +22,6 @@ import AdditionalPhotosGrid from '@/components/admin/AdditionalPhotosGrid'
 import VehicleEditModal, { type VehicleEditPayload } from '@/components/admin/VehicleEditModal'
 import { getPhotoStageRules } from '@/lib/photoStages'
 import { PHOTO_CATEGORIES } from '@/lib/photoCategories'
-import ManagerDashboardModule from '@/modules/ManagerDashboardModule'
-import ManagerPanelBanksModule from '@/modules/ManagerPanelBanksModule'
-import ManagerStaffModule from '@/modules/ManagerStaffModule'
-import FrontDeskModule from '@/modules/FrontDeskModule'
-import TechnicianModule from '@/modules/TechnicianModule'
 
 type Vehicle = {
     id: string
@@ -112,18 +107,8 @@ const TABS = [
     { key: 'trash', label: '🗑️ Trash / Recovery' },
 ] as const
 
-// Admin manages every module from within this page — no separate module nav bar.
-const ADMIN_MODULES = [
-    { key: 'admin', label: '🛡️ Admin Hub' },
-    { key: 'manager', label: '🏢 Manager Dashboard' },
-    { key: 'panels', label: '🏦 Panel Banks & Insurance' },
-    { key: 'staff', label: '👥 Company Staff' },
-    { key: 'frontdesk', label: '📋 Front Desk' },
-    { key: 'technician', label: '🔧 Technician Portal' },
-] as const
-
-type AdminModuleKey = typeof ADMIN_MODULES[number]['key']
-
+// The Admin page is admin work only. To preview another module (manager,
+// front desk, technician, …) use "👁 Log in as" in the Staff section instead.
 const ROLE_FILTERS = ['all', 'admin', 'manager', 'front_desk', 'technician'] as const
 
 const DOCUMENT_CATEGORIES = ['grant', 'jpj', 'insurance', 'ber'] as const
@@ -142,11 +127,6 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 export default function AdminModule() {
-    const [moduleView, setModuleView] = useState<AdminModuleKey>(() => {
-        if (typeof window === 'undefined') return 'admin'
-        const requested = new URLSearchParams(window.location.search).get('tab')
-        return ADMIN_MODULES.some((m) => m.key === requested) ? (requested as AdminModuleKey) : 'admin'
-    })
     const [activeTab, setActiveTab] = useState<'overview' | 'vehicles' | 'users' | 'companies' | 'banks' | 'scanlogs' | 'trash'>('overview')
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [deletedVehicles, setDeletedVehicles] = useState<Vehicle[]>([])
@@ -174,6 +154,9 @@ export default function AdminModule() {
 
     // Edit User Password Modal State
     const [editingPasswordUser, setEditingPasswordUser] = useState<UserProfile | null>(null)
+
+    // Impersonation: user currently being "logged in as" (in-flight guard for the button)
+    const [impersonatingUserId, setImpersonatingUserId] = useState<string | null>(null)
 
     // Theme State ('dark' | 'light') — shared across all pages via useTheme()
     const { isDark } = useTheme()
@@ -855,12 +838,49 @@ export default function AdminModule() {
     const adminShowAfter = adminStage?.after !== 'hidden'
     const adminShowAdditional = adminStage?.additional !== 'hidden'
 
-    function handleModuleChange(next: AdminModuleKey) {
-        setModuleView(next)
-        const url = new URL(window.location.href)
-        if (next === 'admin') url.searchParams.delete('tab')
-        else url.searchParams.set('tab', next)
-        window.history.replaceState(null, '', url.pathname + url.search)
+    // Impersonation: "Log in as this user" from the Users section.
+    // The admin's current session is backed up first, then a server-minted
+    // magic-link token swaps this browser onto the target user's session.
+    // The fixed "Viewing as …" banner in the app shell offers one-click restore.
+    async function handleImpersonateUser(u: UserProfile) {
+        try {
+            setImpersonatingUserId(u.id)
+            const { data: sessionData } = await supabase.auth.getSession()
+            const session = sessionData.session
+            if (!session) {
+                setToast({ message: 'No active session to restore from. Please sign in again.', type: 'error' })
+                return
+            }
+            window.localStorage.setItem('vms_impersonate_backup', JSON.stringify({
+                access_token: session.access_token,
+                refresh_token: session.refresh_token,
+            }))
+
+            const res = await fetch('/api/impersonate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: u.id }),
+            })
+            const json = await res.json().catch(() => ({ message: 'Invalid server response' }))
+            if (!res.ok || !json?.token_hash) {
+                setToast({ message: json?.message || 'Impersonation failed.', type: 'error' })
+                return
+            }
+
+            const { error } = await supabase.auth.verifyOtp({ type: 'magiclink', token_hash: json.token_hash })
+            if (error) {
+                setToast({ message: error.message, type: 'error' })
+                return
+            }
+
+            window.localStorage.setItem('vms_impersonating', '1')
+            window.localStorage.setItem('vms_impersonating_user', u.full_name || u.username || u.email || 'User')
+            window.location.href = '/'
+        } catch (err) {
+            setToast({ message: err instanceof Error ? err.message : 'Impersonation failed.', type: 'error' })
+        } finally {
+            setImpersonatingUserId(null)
+        }
     }
 
     return (
@@ -914,30 +934,6 @@ export default function AdminModule() {
             )}
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-                {/* Module selector — admin manages all modules from within this page */}
-                <div className="mb-6 flex flex-col sm:flex-row sm:items-center gap-2">
-                    <span className={`text-[11px] font-extrabold uppercase tracking-wider shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Module:</span>
-                    <select
-                        value={moduleView}
-                        onChange={(e) => handleModuleChange(e.target.value as AdminModuleKey)}
-                        className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl text-xs font-extrabold border cursor-pointer ${isDark ? 'bg-slate-950 text-white border-slate-700' : 'bg-white text-slate-800 border-slate-200 shadow-sm'}`}
-                    >
-                        {ADMIN_MODULES.map((m) => (
-                            <option key={m.key} value={m.key}>{m.label}</option>
-                        ))}
-                    </select>
-                </div>
-
-                {moduleView !== 'admin' ? (
-                    <div>
-                        {moduleView === 'manager' && <ManagerDashboardModule embedded />}
-                        {moduleView === 'panels' && <ManagerPanelBanksModule embedded />}
-                        {moduleView === 'staff' && <ManagerStaffModule embedded />}
-                        {moduleView === 'frontdesk' && <FrontDeskModule embedded />}
-                        {moduleView === 'technician' && <TechnicianModule embedded />}
-                    </div>
-                ) : (
-                    <>
                 {/* Section selector */}
                 <div className="mb-6 flex items-center gap-2">
                     <span className={`text-[11px] font-extrabold uppercase tracking-wider shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Section:</span>
@@ -1369,6 +1365,14 @@ export default function AdminModule() {
                                             <td className="p-4 text-right">
                                                 <div className="flex flex-wrap gap-2 justify-end">
                                                     <button
+                                                        onClick={() => handleImpersonateUser(u)}
+                                                        disabled={impersonatingUserId === u.id}
+                                                        className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors disabled:opacity-50 ${isDark ? 'bg-sky-950 hover:bg-sky-900 text-sky-300 border-sky-800' : 'bg-sky-50 hover:bg-sky-100 text-sky-700 border-sky-200'}`}
+                                                        title="Log in as this user (admin impersonation)"
+                                                    >
+                                                        {impersonatingUserId === u.id ? '⏳ Switching…' : '👁 Log in as'}
+                                                    </button>
+                                                    <button
                                                         onClick={() => setEditingPasswordUser(u)}
                                                         className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
                                                         title="Change Password"
@@ -1456,6 +1460,14 @@ export default function AdminModule() {
                                             </p>
                                         )}
                                         <div className="flex flex-wrap gap-2">
+                                            <button
+                                                onClick={() => handleImpersonateUser(u)}
+                                                disabled={impersonatingUserId === u.id}
+                                                className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors disabled:opacity-50 ${isDark ? 'bg-sky-950 hover:bg-sky-900 text-sky-300 border-sky-800' : 'bg-sky-50 hover:bg-sky-100 text-sky-700 border-sky-200'}`}
+                                                title="Log in as this user (admin impersonation)"
+                                            >
+                                                {impersonatingUserId === u.id ? '⏳ Switching…' : '👁 Log in as'}
+                                            </button>
                                             <button
                                                 onClick={() => setEditingPasswordUser(u)}
                                                 className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
@@ -1758,8 +1770,6 @@ export default function AdminModule() {
                             </div>
                         )}
                     </div>
-                )}
-                    </>
                 )}
             </main>
         </div>

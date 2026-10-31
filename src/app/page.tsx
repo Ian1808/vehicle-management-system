@@ -22,7 +22,7 @@ const ROLE_MODULES: Record<string, string> = {
 }
 
 const ALLOWED_TABS: Record<string, string[]> = {
-    admin: ['admin'], // Admin manages all modules from within the Admin page (no module nav bar)
+    admin: ['admin'], // Admin works from the Admin page only; "Log in as" in Users lets them preview other modules
     manager: ['manager', 'panels', 'staff', 'frontdesk', 'technician'],
     front_desk: ['frontdesk'],
     technician: ['technician'],
@@ -59,6 +59,8 @@ export default function MainDashboard() {
     const [settingsUsername, setSettingsUsername] = useState('')
     const [settingsFullName, setSettingsFullName] = useState('')
     const [currentCompanyName, setCurrentCompanyName] = useState('')
+    // Impersonation state: active + the name shown on the fixed "Viewing as" banner
+    const [impersonation, setImpersonation] = useState<{ active: boolean; name: string }>({ active: false, name: '' })
 
     const supabase = useMemo(() => createClient(), [])
 
@@ -117,6 +119,12 @@ export default function MainDashboard() {
         return () => { cancelled = true }
     }, [supabase])
 
+    useEffect(() => {
+        const active = window.localStorage.getItem('vms_impersonating') === '1'
+        if (!active) return
+        setImpersonation({ active: true, name: window.localStorage.getItem('vms_impersonating_user') || 'User' })
+    }, [])
+
     function selectTab(next: string) {
         setTab(next)
         const url = new URL(window.location.href)
@@ -125,8 +133,37 @@ export default function MainDashboard() {
     }
 
     async function signOut() {
+        window.localStorage.removeItem('vms_impersonating')
+        window.localStorage.removeItem('vms_impersonating_user')
+        window.localStorage.removeItem('vms_impersonate_backup')
         await supabase.auth.signOut()
         window.location.replace('/login')
+    }
+
+    // Restore the admin session captured before impersonation; fall back to a
+    // full sign-out if the backup is missing or its refresh token has expired.
+    async function exitImpersonation() {
+        let restored = false
+        try {
+            const raw = window.localStorage.getItem('vms_impersonate_backup')
+            if (raw) {
+                const backup = JSON.parse(raw)
+                if (backup?.access_token && backup?.refresh_token) {
+                    const { error } = await supabase.auth.setSession({
+                        access_token: backup.access_token,
+                        refresh_token: backup.refresh_token,
+                    })
+                    restored = !error
+                }
+            }
+        } catch {
+            // fall through to sign-out
+        }
+        window.localStorage.removeItem('vms_impersonating')
+        window.localStorage.removeItem('vms_impersonating_user')
+        window.localStorage.removeItem('vms_impersonate_backup')
+        if (!restored) await supabase.auth.signOut()
+        window.location.replace('/')
     }
 
     async function handleSettingsSave(payload: AccountSettingsPayload): Promise<{ ok: boolean; error?: string }> {
@@ -209,8 +246,20 @@ export default function MainDashboard() {
 
     return (
         <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+            {/* Impersonation banner — shown above everything while admin is "logged in as" another user */}
+            {impersonation.active && (
+                <div className={`fixed top-0 inset-x-0 z-[60] flex items-center justify-between gap-2 px-3 sm:px-4 py-1.5 text-[11px] font-bold text-white shadow-lg ${isDark ? 'bg-purple-700' : 'bg-purple-600'}`}>
+                    <span className="truncate min-w-0">👁 Viewing as {impersonation.name}</span>
+                    <button
+                        onClick={exitImpersonation}
+                        className="shrink-0 rounded-lg bg-white/20 hover:bg-white/30 px-3 py-1 transition-colors cursor-pointer"
+                    >
+                        Exit impersonation
+                    </button>
+                </div>
+            )}
             {/* Global top bar — shared across all roles */}
-            <header className={`border-b backdrop-blur-md sticky top-0 z-40 ${isDark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'}`}>
+            <header className={`border-b backdrop-blur-md sticky z-40 ${impersonation.active ? 'top-7' : 'top-0'} ${isDark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'}`}>
                 <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
                     <div className="flex items-center gap-3 min-w-0">
                         <div className={`w-9 h-9 rounded-2xl border flex items-center justify-center text-base font-black shrink-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>🚗</div>

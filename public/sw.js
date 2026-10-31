@@ -1,7 +1,7 @@
 // Vehicle Management System — service worker
 // Strategy: cache-first for hashed static assets, network-first for pages/API,
 // with a basic cache fallback so the app shell survives short offline periods.
-const CACHE_VERSION = 'vms-v2'
+const CACHE_VERSION = 'vms-v3'
 const STATIC_CACHE = `${CACHE_VERSION}-static`
 const PAGE_CACHE = `${CACHE_VERSION}-pages`
 
@@ -29,6 +29,11 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
+
+  // Dev mode (localhost): never intercept. The dev server recompiles chunks
+  // in place with stable names, so cache-first would hand browsers stale UI
+  // after every edit. PWA caching only kicks in for the deployed app.
+  if (self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1') return
 
   // Hashed build assets (/_next/static/*) and icons: immutable → cache-first.
   if (url.pathname.startsWith('/_next/static/') || url.pathname.startsWith('/icons/')) {
