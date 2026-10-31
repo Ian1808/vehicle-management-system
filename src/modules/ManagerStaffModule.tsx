@@ -10,7 +10,7 @@ import SectionHeading from '@/components/ui/SectionHeading'
 import EmptyState from '@/components/ui/EmptyState'
 import ResponsiveTable from '@/components/ui/ResponsiveTable'
 import StaffUserModal, { type StaffUserPayload } from '@/components/admin/StaffUserModal'
-import ChangePasswordModal from '@/components/admin/ChangePasswordModal'
+import StaffEditModal, { type StaffEditPayload } from '@/components/admin/StaffEditModal'
 
 type Toast = { message: string; type: 'success' | 'error' } | null
 type Confirm = {
@@ -43,7 +43,7 @@ export default function ManagerStaffModule({ embedded = false }: { embedded?: bo
     const [companyName, setCompanyName] = useState('')
     const [companyId, setCompanyId] = useState<string | null>(null)
     const [showUserModal, setShowUserModal] = useState(false)
-    const [editingPasswordUser, setEditingPasswordUser] = useState<CompanyStaff | null>(null)
+    const [editingUser, setEditingUser] = useState<CompanyStaff | null>(null)
 
     const supabase = useMemo(() => createClient(), [])
 
@@ -216,28 +216,25 @@ export default function ManagerStaffModule({ embedded = false }: { embedded?: bo
         })
     }
 
-    async function handleUpdateUserRole(userId: string, newRole: string) {
-        if (newRole !== 'front_desk' && newRole !== 'technician') return
-        setConfirmModal({
-            title: 'Confirm Role Change',
-            message: `Are you sure you want to change this user's role to "${newRole.toUpperCase()}"?`,
-            confirmText: 'Update Role',
-            confirmVariant: 'success',
-            onConfirm: async () => {
-                setConfirmModal(null)
-                const { error } = await supabase
-                    .from('users')
-                    .update({ role: newRole })
-                    .eq('id', userId)
+    async function handleEditStaffUser(payload: StaffEditPayload): Promise<{ ok: boolean; error?: string }> {
+        const updatePayload: Record<string, unknown> = {
+            full_name: payload.fullName,
+            username: payload.username,
+            role: payload.role,
+            technician_type: payload.role === 'technician' ? (payload.technicianType || 'inhouse') : null,
+            specialty: payload.role === 'technician' && payload.technicianType === 'third_party' ? (payload.specialty || null) : null,
+        }
+        const { error } = await supabase
+            .from('users')
+            .update(updatePayload)
+            .eq('id', editingUser?.id)
 
-                if (error) {
-                    showToast('Error updating role: ' + error.message, 'error')
-                } else {
-                    showToast('User role updated successfully!', 'success')
-                    await fetchStaff(companyId)
-                }
-            }
-        })
+        if (error) return { ok: false, error: error.message }
+
+        showToast('Staff account updated successfully!', 'success')
+        await fetchStaff(companyId)
+        setEditingUser(null)
+        return { ok: true }
     }
 
     const innerCard = isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'
@@ -272,15 +269,15 @@ export default function ManagerStaffModule({ embedded = false }: { embedded?: bo
                 />
             )}
 
-            {editingPasswordUser && (
-                <ChangePasswordModal
+            {editingUser && (
+                <StaffEditModal
                     isDark={isDark}
-                    userName={editingPasswordUser.full_name}
-                    onSubmit={async () => {
-                        showToast('Password reset instructions or update requested.', 'success')
-                        return true
-                    }}
-                    onClose={() => setEditingPasswordUser(null)}
+                    user={editingUser}
+                    title="Edit Staff Account"
+                    subtitle="Update details, role, and credentials for this staff member."
+                    allowRoles={['front_desk', 'technician']}
+                    onSubmit={handleEditStaffUser}
+                    onClose={() => setEditingUser(null)}
                 />
             )}
 
@@ -343,16 +340,9 @@ export default function ManagerStaffModule({ embedded = false }: { embedded?: bo
                                                         </span>
                                                     </td>
                                                     <td className="p-4">
-                                                        <select
-                                                            value={u.role}
-                                                            onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
-                                                            className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer capitalize ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
-                                                        >
-                                                            <option value="front_desk">Front Desk</option>
-                                                            <option value="technician">Technician</option>
-                                                        </select>
+                                                        <p className={`font-black text-xs capitalize ${isDark ? 'text-white' : 'text-slate-900'}`}>{u.role === 'front_desk' ? 'Front Desk' : 'Technician'}</p>
                                                         {u.role === 'technician' && (
-                                                            <p className={`text-[10px] font-bold mt-1 ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>
+                                                            <p className={`text-[10px] font-bold mt-0.5 ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>
                                                                 {u.technician_type === 'third_party' ? `3rd-Party • ${u.specialty || 'No specialty'}` : 'In-House'}
                                                             </p>
                                                         )}
@@ -363,11 +353,11 @@ export default function ManagerStaffModule({ embedded = false }: { embedded?: bo
                                                     <td className="p-4 text-right">
                                                         <div className="flex flex-wrap gap-2 justify-end">
                                                             <button
-                                                                onClick={() => setEditingPasswordUser(u)}
+                                                                onClick={() => setEditingUser(u)}
                                                                 className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
-                                                                title="Change Password"
+                                                                title="Edit all user details"
                                                             >
-                                                                🔑 Password
+                                                                ✏️ Edit
                                                             </button>
                                                             <button
                                                                 onClick={() => handleToggleSuspendUser(u.id, Boolean(u.is_suspended), u.full_name)}
@@ -412,14 +402,7 @@ export default function ManagerStaffModule({ embedded = false }: { embedded?: bo
                                             <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                                                 Last login: {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never logged in'}
                                             </p>
-                                            <select
-                                                value={u.role}
-                                                onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
-                                                className={`w-full border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer capitalize ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
-                                            >
-                                                <option value="front_desk">Front Desk</option>
-                                                <option value="technician">Technician</option>
-                                            </select>
+                                            <p className={`text-xs font-black capitalize ${isDark ? 'text-white' : 'text-slate-900'}`}>{u.role === 'front_desk' ? 'Front Desk' : 'Technician'}</p>
                                             {u.role === 'technician' && (
                                                 <p className={`text-[10px] font-bold ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>
                                                     {u.technician_type === 'third_party' ? `3rd-Party • ${u.specialty || 'No specialty'}` : 'In-House'}
@@ -427,11 +410,11 @@ export default function ManagerStaffModule({ embedded = false }: { embedded?: bo
                                             )}
                                             <div className="flex flex-wrap gap-2">
                                                 <button
-                                                    onClick={() => setEditingPasswordUser(u)}
+                                                    onClick={() => setEditingUser(u)}
                                                     className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
-                                                    title="Change Password"
+                                                    title="Edit all user details"
                                                 >
-                                                    🔑 Password
+                                                    ✏️ Edit
                                                 </button>
                                                 <button
                                                     onClick={() => handleToggleSuspendUser(u.id, Boolean(u.is_suspended), u.full_name)}

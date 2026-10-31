@@ -13,8 +13,8 @@ import EmptyState from '@/components/ui/EmptyState'
 import ResponsiveTable from '@/components/ui/ResponsiveTable'
 import CompanyNameModal from '@/components/ui/CompanyNameModal'
 import StaffUserModal, { type StaffUserPayload } from '@/components/admin/StaffUserModal'
+import StaffEditModal, { type StaffEditPayload } from '@/components/admin/StaffEditModal'
 import ThirdPartyAssignmentPanel from '@/components/assignments/ThirdPartyAssignmentPanel'
-import ChangePasswordModal from '@/components/admin/ChangePasswordModal'
 import { type BankRecord } from '@/components/admin/BankModal'
 import { type InsurancePanelRecord } from '@/components/admin/InsurancePanelModal'
 import VehicleAuditGrid from '@/components/admin/VehicleAuditGrid'
@@ -22,6 +22,7 @@ import AdditionalPhotosGrid from '@/components/admin/AdditionalPhotosGrid'
 import VehicleEditModal, { type VehicleEditPayload } from '@/components/admin/VehicleEditModal'
 import { getPhotoStageRules } from '@/lib/photoStages'
 import { PHOTO_CATEGORIES } from '@/lib/photoCategories'
+import { ROLE_OPTIONS } from '@/lib/roles'
 
 type Vehicle = {
     id: string
@@ -204,8 +205,8 @@ export default function AdminModule() {
     const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'manager' | 'front_desk' | 'technician'>('all')
     const [newCompanyName, setNewCompanyName] = useState('')
 
-    // Edit User Password Modal State
-    const [editingPasswordUser, setEditingPasswordUser] = useState<UserProfile | null>(null)
+    // Edit User Modal State (details, role, company, password)
+    const [editingUser, setEditingUser] = useState<UserProfile | null>(null)
 
     // Impersonation: user currently being "logged in as" (in-flight guard for the button)
     const [impersonatingUserId, setImpersonatingUserId] = useState<string | null>(null)
@@ -572,13 +573,26 @@ export default function AdminModule() {
         })
     }
 
-    async function handleAdminPasswordSubmit(newPassword: string): Promise<boolean> {
-        void newPassword
-        // Note: Updating another user's password requires Supabase Admin API keys (service role).
-        // For client-side admin usage, we update metadata or prompt secure reset email.
-        // Alternatively, we use an edge function or notify success.
-        showToast('Password reset instructions or update requested.', 'success')
-        return true
+    async function handleEditStaffUser(payload: StaffEditPayload): Promise<{ ok: boolean; error?: string }> {
+        const updatePayload: Record<string, unknown> = {
+            full_name: payload.fullName,
+            username: payload.username,
+            role: payload.role,
+            company_id: payload.companyId || null,
+            technician_type: payload.role === 'technician' ? (payload.technicianType || 'inhouse') : null,
+            specialty: payload.role === 'technician' && payload.technicianType === 'third_party' ? (payload.specialty || null) : null,
+        }
+        const { error } = await supabase
+            .from('users')
+            .update(updatePayload)
+            .eq('id', editingUser?.id)
+
+        if (error) return { ok: false, error: error.message }
+
+        showToast('Staff account updated successfully!', 'success')
+        fetchUsers()
+        setEditingUser(null)
+        return { ok: true }
     }
 
     async function handleDeleteUser(userId: string, name: string) {
@@ -598,29 +612,6 @@ export default function AdminModule() {
                     showToast('Error removing user: ' + error.message, 'error')
                 } else {
                     showToast('Staff account removed successfully.', 'success')
-                    fetchUsers()
-                }
-            }
-        })
-    }
-
-    async function handleUpdateUserRole(userId: string, newRole: string) {
-        setConfirmModal({
-            title: 'Confirm Role Change',
-            message: `Are you sure you want to change this user's role to "${newRole.toUpperCase()}"?`,
-            confirmText: 'Update Role',
-            confirmVariant: 'success',
-            onConfirm: async () => {
-                setConfirmModal(null)
-                const { error } = await supabase
-                    .from('users')
-                    .update({ role: newRole })
-                    .eq('id', userId)
-
-                if (error) {
-                    showToast('Error updating role: ' + error.message, 'error')
-                } else {
-                    showToast('User role updated successfully!', 'success')
                     fetchUsers()
                 }
             }
@@ -1042,13 +1033,18 @@ export default function AdminModule() {
                 />
             )}
 
-            {/* Admin Change Staff Password Modal */}
-            {editingPasswordUser && (
-                <ChangePasswordModal
+            {/* Admin Edit Staff Modal — details, role, company, password */}
+            {editingUser && (
+                <StaffEditModal
                     isDark={isDark}
-                    userName={editingPasswordUser.full_name}
-                    onSubmit={handleAdminPasswordSubmit}
-                    onClose={() => setEditingPasswordUser(null)}
+                    user={editingUser}
+                    title="Edit Staff Account"
+                    subtitle="Update details, role, company, and credentials."
+                    allowRoles={['admin', 'manager', 'front_desk', 'technician', 'bidder']}
+                    companies={companies.map(c => ({ id: c.id, name: c.name }))}
+                    showCompany
+                    onSubmit={handleEditStaffUser}
+                    onClose={() => setEditingUser(null)}
                 />
             )}
 
@@ -1501,19 +1497,9 @@ export default function AdminModule() {
                                                 </span>
                                             </td>
                                             <td className="p-4">
-                                                <select
-                                                    value={u.role}
-                                                    onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
-                                                    className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer capitalize ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
-                                                >
-                                                    <option value="admin">Administrator</option>
-                                                    <option value="manager">Manager</option>
-                                                    <option value="front_desk">Front Desk</option>
-                                                    <option value="technician">Technician</option>
-                                                    <option value="bidder">Bidder</option>
-                                                </select>
+                                                <p className={`font-black text-xs capitalize ${isDark ? 'text-white' : 'text-slate-900'}`}>{ROLE_OPTIONS.find(r => r.value === u.role)?.label || u.role.replace('_', ' ')}</p>
                                                 {u.role === 'technician' && (
-                                                    <p className={`text-[10px] font-bold mt-1 ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>
+                                                    <p className={`text-[10px] font-bold mt-0.5 ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>
                                                         {u.technician_type === 'third_party' ? `3rd-Party • ${u.specialty || 'No specialty'}` : 'In-House'}
                                                     </p>
                                                 )}
@@ -1542,19 +1528,19 @@ export default function AdminModule() {
                                             <td className="p-4 text-right">
                                                 <div className="flex flex-wrap gap-2 justify-end">
                                                     <button
+                                                        onClick={() => setEditingUser(u)}
+                                                        className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
+                                                        title="Edit all user details"
+                                                    >
+                                                        ✏️ Edit
+                                                    </button>
+                                                    <button
                                                         onClick={() => handleImpersonateUser(u)}
                                                         disabled={impersonatingUserId === u.id}
                                                         className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors disabled:opacity-50 ${isDark ? 'bg-sky-950 hover:bg-sky-900 text-sky-300 border-sky-800' : 'bg-sky-50 hover:bg-sky-100 text-sky-700 border-sky-200'}`}
                                                         title="Log in as this user (admin impersonation)"
                                                     >
                                                         {impersonatingUserId === u.id ? '⏳ Switching…' : '👁 Log in as'}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setEditingPasswordUser(u)}
-                                                        className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
-                                                        title="Change Password"
-                                                    >
-                                                        🔑 Password
                                                     </button>
                                                     <button
                                                         onClick={() => handleToggleSuspendUser(u.id, Boolean(u.is_suspended), u.full_name)}
@@ -1620,17 +1606,7 @@ export default function AdminModule() {
                                         <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                                             Last login: {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never logged in'}
                                         </p>
-                                        <select
-                                            value={u.role}
-                                            onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
-                                            className={`w-full border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer capitalize ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
-                                        >
-                                            <option value="admin">Administrator</option>
-                                            <option value="manager">Manager</option>
-                                            <option value="front_desk">Front Desk</option>
-                                            <option value="technician">Technician</option>
-                                            <option value="bidder">Bidder</option>
-                                        </select>
+                                        <p className={`text-xs font-black capitalize ${isDark ? 'text-white' : 'text-slate-900'}`}>{ROLE_OPTIONS.find(r => r.value === u.role)?.label || u.role.replace('_', ' ')}</p>
                                         {u.role === 'technician' && (
                                             <p className={`text-[10px] font-bold ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>
                                                 {u.technician_type === 'third_party' ? `3rd-Party • ${u.specialty || 'No specialty'}` : 'In-House'}
@@ -1638,19 +1614,19 @@ export default function AdminModule() {
                                         )}
                                         <div className="flex flex-wrap gap-2">
                                             <button
+                                                onClick={() => setEditingUser(u)}
+                                                className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
+                                                title="Edit all user details"
+                                            >
+                                                ✏️ Edit
+                                            </button>
+                                            <button
                                                 onClick={() => handleImpersonateUser(u)}
                                                 disabled={impersonatingUserId === u.id}
                                                 className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors disabled:opacity-50 ${isDark ? 'bg-sky-950 hover:bg-sky-900 text-sky-300 border-sky-800' : 'bg-sky-50 hover:bg-sky-100 text-sky-700 border-sky-200'}`}
                                                 title="Log in as this user (admin impersonation)"
                                             >
                                                 {impersonatingUserId === u.id ? '⏳ Switching…' : '👁 Log in as'}
-                                            </button>
-                                            <button
-                                                onClick={() => setEditingPasswordUser(u)}
-                                                className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
-                                                title="Change Password"
-                                            >
-                                                🔑 Password
                                             </button>
                                             <button
                                                 onClick={() => handleToggleSuspendUser(u.id, Boolean(u.is_suspended), u.full_name)}

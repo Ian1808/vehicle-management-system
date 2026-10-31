@@ -44,13 +44,26 @@ const STATUS_FLOW_LABELS: Record<string, string> = {
     road_ready: 'Road Ready',
 }
 
-// Accordion sections for the Manager page. Front Desk + Technician work is
+// Stacked sections for the Manager page. Front Desk + Technician work is
 // embedded here so the manager never needs to leave this page.
 const SECTIONS = [
     { key: 'overview', icon: '📊', short: 'Overview', title: 'Company Overview', hint: 'Financials, fleet & staff at a glance' },
     { key: 'fleet', icon: '📋', short: 'Front Desk', title: 'Front Desk Work', hint: 'Intake, vehicle queue, documents, costs' },
     { key: 'workshop', icon: '🔧', short: 'Workshop', title: 'Workshop & Repair', hint: 'Repair stages & photo evidence' },
 ] as const
+
+function SectionBar({ icon, title, hint, badge, isDark }: { icon: string; title: string; hint: string; badge: number; isDark: boolean }) {
+    return (
+        <div className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 mb-4 ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
+            <span className="flex items-center gap-2 min-w-0">
+                <span className="text-base leading-none shrink-0">{icon}</span>
+                <span className="text-[13px] font-extrabold truncate">{title}</span>
+                <span className={`hidden sm:inline text-[10px] font-semibold truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{hint}</span>
+            </span>
+            <span className={`text-[10px] font-bold rounded-md px-1.5 py-0.5 shrink-0 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>{badge}</span>
+        </div>
+    )
+}
 
 export default function ManagerDashboardModule({ embedded = false }: { embedded?: boolean }) {
     const { isDark } = useTheme()
@@ -64,11 +77,16 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
     const [staff, setStaff] = useState<CompanyStaff[]>([])
     const [editCompanyOpen, setEditCompanyOpen] = useState(false)
     const [editingVehicle, setEditingVehicle] = useState<CompanyVehicle | null>(null)
-    // Accordion sections: compact cards, click to expand (same as Admin)
-    const [activeSection, setActiveSection] = useState('overview')
-    const [collapsed, setCollapsed] = useState(false)
+    // Stacked layout: all three sections render together. Nonce remounts the
+    // embedded Front Desk module so a deep-link (?vehicle=<id>) re-opens it.
+    const [frontDeskNonce, setFrontDeskNonce] = useState(0)
 
     const supabase = useMemo(() => createClient(), [])
+
+    function scrollToSection(id: string) {
+        const el = document.getElementById(id)
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
 
     function showToast(message: string, type: 'success' | 'error') {
         setToast({ message, type })
@@ -273,7 +291,7 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                     right={
                         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                             {companySelector}
-                            {role === 'manager' && viewCompanyId && (
+                            {role === 'admin' && viewCompanyId && (
                                 <button
                                     onClick={() => setEditCompanyOpen(true)}
                                     className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2.5 rounded-2xl text-xs font-bold shadow-lg transition-all cursor-pointer whitespace-nowrap"
@@ -285,8 +303,8 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                     }
                 />
 
-                {/* Section picker — compact cards, click to expand (accordion, same as Admin) */}
-                <div className="mb-6 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {/* Section picker — compact stacked cards, click to expand (accordion, same as Admin) */}
+                <div className="mb-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
                     {SECTIONS.map((sec) => {
                         const open = activeSection === sec.key && !collapsed
                         const badge = sec.key === 'overview' || sec.key === 'fleet' ? fleetStats.total : fleetStats.in_repair
@@ -302,25 +320,24 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                                         setCollapsed(false)
                                     }
                                 }}
-                                className={`group rounded-xl border px-3 py-2.5 text-left transition-all cursor-pointer ${
+                                className={`group rounded-xl border px-3 py-2 text-left transition-all cursor-pointer ${
                                     open
                                         ? 'bg-purple-600 border-purple-500 text-white shadow-md'
                                         : isDark
                                             ? 'bg-slate-900 border-slate-700 hover:border-purple-500 text-slate-200'
                                             : 'bg-white border-slate-200 hover:border-purple-400 text-slate-700 shadow-sm'
                                 }`}
-                                title={`${sec.icon} ${sec.title} — click to expand`}
+                                title={`${sec.icon} ${sec.title} — click to ${open ? 'collapse' : 'expand'}`}
                             >
                                 <div className="flex items-center justify-between gap-2">
                                     <span className="flex items-center gap-1.5 min-w-0">
                                         <span className="text-base leading-none shrink-0">{sec.icon}</span>
                                         <span className="text-[13px] font-extrabold truncate">{sec.short}</span>
                                     </span>
-                                    <span className={`text-[10px] font-bold rounded-md px-1.5 py-0.5 shrink-0 ${open ? 'bg-white/20 text-white' : isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>{badge}</span>
-                                </div>
-                                <div className={`mt-1.5 flex items-center justify-between text-[10px] font-semibold ${open ? 'text-purple-100' : isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                                    <span className="truncate">{open ? 'Click to collapse' : 'Click to expand'}</span>
-                                    <span className={`shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▾</span>
+                                    <span className="flex items-center gap-1.5 shrink-0">
+                                        <span className={`text-[10px] font-bold rounded-md px-1.5 py-0.5 ${open ? 'bg-white/20 text-white' : isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>{badge}</span>
+                                        <span className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▾</span>
+                                    </span>
                                 </div>
                             </button>
                         )
@@ -334,8 +351,8 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                         <EmptyState isDark={isDark} message="No company selected. Create a company in the Admin Hub first." />
                     </Card>
                 ) : collapsed ? (
-                    <div className={`rounded-2xl border-2 border-dashed px-6 py-12 text-center text-xs font-semibold ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
-                        All sections are collapsed. Click a card above to open its contents.
+                    <div className={`rounded-xl border px-4 py-2 text-center text-[11px] font-semibold ${isDark ? 'border-slate-800 bg-slate-900/40 text-slate-500' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>
+                        ▸ All sections are collapsed — tap a card above to open it.
                     </div>
                 ) : (
                     <>

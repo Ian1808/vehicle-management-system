@@ -195,24 +195,6 @@ export default function MainDashboard() {
 
             if (profileError) throw profileError
 
-            if (payload.newPassword.trim()) {
-                if (!payload.oldPassword.trim()) {
-                    return { ok: false, error: 'Please enter your current password.' }
-                }
-
-                const { error: signInError } = await supabase.auth.signInWithPassword({
-                    email: currentUserEmail,
-                    password: payload.oldPassword.trim(),
-                })
-
-                if (signInError) {
-                    return { ok: false, error: 'Incorrect old password.' }
-                }
-
-                const { error: passwordError } = await supabase.auth.updateUser({ password: payload.newPassword.trim() })
-                if (passwordError) throw passwordError
-            }
-
             setSettingsFullName(payload.fullName)
             setSettingsUsername(payload.username)
             return { ok: true }
@@ -372,6 +354,8 @@ export default function MainDashboard() {
                     role={role || undefined}
                     companyName={role === 'admin' ? 'All Companies' : currentCompanyName || undefined}
                     showLandingModule={role !== 'admin'}
+                    landingOptions={(role ? ALLOWED_TABS[role] : []).map(key => ({ value: key, label: `${TAB_META[key].icon} ${TAB_META[key].label}` }))}
+                    defaultLandingLabel={role ? TAB_META[ROLE_MODULES[role]].label : 'Manager Dashboard'}
                     onClose={() => setShowSettingsModal(false)}
                     onSave={handleSettingsSave}
                 />

@@ -1,13 +1,11 @@
 "use client"
 
 import { useState } from 'react'
+import ChangePasswordButton from '@/components/ui/ChangePasswordButton'
 
 export type AccountSettingsPayload = {
     fullName: string
     username: string
-    oldPassword: string
-    newPassword: string
-    confirmPassword: string
 }
 
 type AccountSettingsModalProps = {
@@ -23,6 +21,8 @@ type AccountSettingsModalProps = {
     role?: string
     companyName?: string
     showLandingModule?: boolean
+    landingOptions?: { value: string; label: string }[]
+    defaultLandingLabel?: string
     onClose: () => void
     onSave: (payload: AccountSettingsPayload) => Promise<{ ok: boolean; error?: string }>
 }
@@ -53,6 +53,8 @@ export default function AccountSettingsModal({
     role,
     companyName,
     showLandingModule = false,
+    landingOptions = [],
+    defaultLandingLabel = 'Manager Dashboard',
     onClose,
     onSave,
 }: AccountSettingsModalProps) {
@@ -61,34 +63,24 @@ export default function AccountSettingsModal({
     const [fullNameInput, setFullNameInput] = useState(fullName)
     const [usernameInput, setUsernameInput] = useState(username)
     const [landingModule, setLandingModule] = useState(() => (typeof window !== 'undefined' ? window.localStorage.getItem('vms-landing-module') || '' : ''))
-    const [oldPassword, setOldPassword] = useState('')
-    const [newPassword, setNewPassword] = useState('')
-    const [confirmNewPassword, setConfirmNewPassword] = useState('')
-    const [showOldPassword, setShowOldPassword] = useState(false)
-    const [showNewPassword, setShowNewPassword] = useState(false)
-    const [showConfirmPassword, setShowConfirmPassword] = useState(false)
     const [error, setError] = useState('')
     const [saving, setSaving] = useState(false)
 
     const inputClass = `w-full border rounded-xl p-3 text-xs font-medium focus:ring-2 ${accentStyles.ring} focus:outline-none ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`
     const disabledClass = `w-full border rounded-xl p-3 text-xs font-medium cursor-not-allowed ${isDark ? 'bg-slate-950 border-slate-800 text-slate-500' : 'bg-slate-100 border-slate-200 text-slate-500'}`
     const labelClass = `block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`
-    const smallLabelClass = `block text-[10px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault()
         setError('')
-        if (newPassword.trim() && newPassword !== confirmNewPassword) {
-            setError('New passwords do not match.')
+        if (!usernameInput.trim() || !fullNameInput.trim()) {
+            setError('Full name and username are required.')
             return
         }
         setSaving(true)
         const result = await onSave({
             fullName: fullNameInput,
             username: usernameInput.trim(),
-            oldPassword,
-            newPassword,
-            confirmPassword: confirmNewPassword,
         })
         setSaving(false)
         if (result.ok) {
@@ -155,12 +147,10 @@ export default function AccountSettingsModal({
                             <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Default Landing Module</label>
                             <p className={`text-[10px] mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Which module to open first after signing in.</p>
                             <select value={landingModule} onChange={(e) => setLandingModule(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-bold cursor-pointer ${isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}>
-                                <option value="">Admin Hub (Default)</option>
-                                <option value="manager">Manager Dashboard</option>
-                                <option value="panels">Panel Banks & Insurance</option>
-                                <option value="staff">Staff Management</option>
-                                <option value="frontdesk">Front Desk</option>
-                                <option value="technician">Technician Portal</option>
+                                <option value="">{defaultLandingLabel} (Default)</option>
+                                {landingOptions.map(o => (
+                                    <option key={o.value} value={o.value}>{o.label}</option>
+                                ))}
                             </select>
                         </div>
                     )}
@@ -181,56 +171,8 @@ export default function AccountSettingsModal({
                         <input type="text" required value={fullNameInput} onChange={(e) => setFullNameInput(e.target.value)} className={inputClass} />
                     </div>
 
-                    <div className={`pt-4 border-t space-y-3 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                        <h4 className={`text-xs font-black uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Change Password (Optional)</h4>
-
-                        <div>
-                            <label className={smallLabelClass}>Current Password</label>
-                            <div className="relative">
-                                <input
-                                    type={showOldPassword ? 'text' : 'password'}
-                                    placeholder="••••••••"
-                                    value={oldPassword}
-                                    onChange={(e) => setOldPassword(e.target.value)}
-                                    className={`${inputClass} pr-10`}
-                                />
-                                <button type="button" onClick={() => setShowOldPassword(!showOldPassword)} className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs cursor-pointer ${isDark ? 'text-slate-400 ' + accentStyles.hover : 'text-slate-500 ' + accentStyles.hover}`}>
-                                    {showOldPassword ? '🙈' : '👁️'}
-                                </button>
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className={smallLabelClass}>New Password</label>
-                            <div className="relative">
-                                <input
-                                    type={showNewPassword ? 'text' : 'password'}
-                                    placeholder="••••••••"
-                                    value={newPassword}
-                                    onChange={(e) => setNewPassword(e.target.value)}
-                                    className={`${inputClass} pr-10`}
-                                />
-                                <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs cursor-pointer ${isDark ? 'text-slate-400 ' + accentStyles.hover : 'text-slate-500 ' + accentStyles.hover}`}>
-                                    {showNewPassword ? '🙈' : '👁️'}
-                                </button>
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className={smallLabelClass}>Confirm New Password</label>
-                            <div className="relative">
-                                <input
-                                    type={showConfirmPassword ? 'text' : 'password'}
-                                    placeholder="••••••••"
-                                    value={confirmNewPassword}
-                                    onChange={(e) => setConfirmNewPassword(e.target.value)}
-                                    className={`${inputClass} pr-10`}
-                                />
-                                <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs cursor-pointer ${isDark ? 'text-slate-400 ' + accentStyles.hover : 'text-slate-500 ' + accentStyles.hover}`}>
-                                    {showConfirmPassword ? '🙈' : '👁️'}
-                                </button>
-                            </div>
-                        </div>
+                    <div className={`pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                        <ChangePasswordButton isDark={isDark} accent={accent} />
                     </div>
 
                     <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>

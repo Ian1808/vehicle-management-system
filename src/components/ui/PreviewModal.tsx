@@ -142,16 +142,8 @@ export default function PreviewModal({ preview, onClose, onDownload, onNavigate,
                         onClick={() => onDownload(item.url, item.title)}
                         className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
                     >
-                        💾 Save File
+                        💾 Download
                     </button>
-                    <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5"
-                    >
-                        ↗️ Open in New Tab
-                    </a>
                     <button
                         onClick={onClose}
                         className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
