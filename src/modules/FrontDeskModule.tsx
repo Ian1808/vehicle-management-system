@@ -586,8 +586,8 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
                 </div>
               </div>
 
-              {/* Detail tabs — segmented row, all options always visible */}
-              <div className="flex gap-1.5 sm:gap-2 pt-5 pb-1 -mb-px">
+              {/* Detail tabs — 2×2 grid on phones so all options are always visible, single row on desktop */}
+              <div className="grid grid-cols-2 gap-1.5 sm:flex sm:gap-2 pt-5 pb-1 -mb-px">
                 {([
                   { key: 'overview' as const, label: 'Overview', badge: 0 },
                   { key: 'documents' as const, label: 'Documents', badge: docCount },
@@ -597,9 +597,9 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
                   <button
                     key={tab.key}
                     onClick={() => setDetailTab(tab.key)}
-                    className={`flex-1 min-w-0 flex items-center justify-center gap-1 px-1.5 sm:px-3 py-2.5 rounded-xl text-[11px] sm:text-xs font-extrabold border cursor-pointer transition-colors ${detailTab === tab.key ? 'bg-blue-600 text-white border-blue-600' : isDark ? 'border-slate-700 bg-slate-900 text-slate-400 hover:text-white' : 'border-slate-200 bg-white text-slate-600 hover:text-slate-900'}`}
+                    className={`flex items-center justify-center gap-1 px-2 sm:flex-1 sm:px-3 py-2.5 rounded-xl text-xs font-extrabold border cursor-pointer transition-colors ${detailTab === tab.key ? 'bg-blue-600 text-white border-blue-600' : isDark ? 'border-slate-700 bg-slate-900 text-slate-400 hover:text-white' : 'border-slate-200 bg-white text-slate-600 hover:text-slate-900'}`}
                   >
-                    <span className="truncate">{tab.label}</span>
+                    <span>{tab.label}</span>
                     {tab.badge > 0 && (
                       <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-black ${detailTab === tab.key ? 'bg-white/20 text-white' : isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>{tab.badge}</span>
                     )}

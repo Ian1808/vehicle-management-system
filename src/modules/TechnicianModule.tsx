@@ -58,6 +58,7 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
     const [toast, setToast] = useState<ToastState>(null)
     const [confirmModal, setConfirmModal] = useState<ConfirmState>(null)
     const [previewMedia, setPreviewMedia] = useState<PreviewState>(null)
+    const [photoGroup, setPhotoGroup] = useState<'before' | 'after' | 'additional'>('before')
     const { isDark } = useTheme()
 
     // Additional Evidence Photos State
@@ -192,6 +193,7 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
             }
         }
         loadMedia()
+        setPhotoGroup('before')
     }, [selectedVehicle?.id])
 
     function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>, categoryKey: string, mediaType: 'photo_before' | 'photo_after') {
@@ -348,6 +350,14 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
     const additionalMode = stage?.additional ?? 'readonly'
     const showBeforeSection = beforeMode !== 'hidden'
     const showAfterSection = afterMode !== 'hidden'
+
+    // Photo evidence tabs — one group at a time (same pattern as Front Desk)
+    const photoGroups = [
+        { key: 'before' as const, label: 'Before Repair', count: beforeCapturedAngles, total: totalAngles, shown: showBeforeSection },
+        { key: 'after' as const, label: 'After Repair', count: afterCapturedAngles, total: totalAngles, shown: showAfterSection },
+        { key: 'additional' as const, label: 'Additional', count: additionalPhotos.length, total: 0, shown: additionalMode !== 'hidden' },
+    ].filter(g => g.shown)
+    const activePhotoGroup = photoGroups.some(g => g.key === photoGroup) ? photoGroup : (photoGroups[0]?.key ?? null)
 
     function handleStartRepair() {
         if (!selectedVehicle) return
@@ -685,137 +695,133 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                                 </div>
                             )}
 
-                            {/* 8 Mandatory Before/After Angles */}
-                            {(showBeforeSection || showAfterSection) && (
+                            {/* Photo evidence — tabbed: Before / After / Additional, one group at a time */}
+                            {photoGroups.length > 0 && (
                                 <div className="pt-8 space-y-6">
                                     <div className="flex flex-wrap items-center justify-between gap-3">
-                                        <h3 className={`text-sm font-extrabold tracking-wider uppercase ${isDark ? 'text-white' : 'text-slate-900'}`}>Workshop Inspection Evidence (8 Angles)</h3>
-                                        <span className={`text-[11px] font-bold px-3 py-1 rounded-full border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
-                                            {showBeforeSection && `Before ${beforeCapturedAngles}/${totalAngles}`}{showBeforeSection && showAfterSection && ' · '}{showAfterSection && `After ${afterCapturedAngles}/${totalAngles}`}
-                                        </span>
+                                        <h3 className={`text-sm font-extrabold tracking-wider uppercase ${isDark ? 'text-white' : 'text-slate-900'}`}>Workshop Inspection Evidence</h3>
                                     </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                        {PHOTO_CATEGORIES.map((cat) => {
-                                            const before = mediaItems.find(m => m.media_type === 'photo_before' && m.category === cat.key)
-                                            const after = mediaItems.find(m => m.media_type === 'photo_after' && m.category === cat.key)
-
-                                            return (
-                                                <div key={cat.key} className={`border rounded-2xl p-4 sm:p-5 ${innerCard}`}>
-                                                    <p className={`text-xs font-extrabold uppercase mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>{cat.label}</p>
-
-                                                    <div className={`grid gap-4 ${showBeforeSection && showAfterSection ? 'grid-cols-1 min-[420px]:grid-cols-2' : 'grid-cols-1'}`}>
-                                                        {showBeforeSection && (
-                                                            <PhotoEvidenceCell
-                                                                isDark={isDark}
-                                                                phase="before"
-                                                                isCaptured={!!before}
-                                                                photoUrl={before?.file_url}
-                                                                readonly={beforeMode === 'readonly'}
-                                                                onView={() => openPhaseGallery('photo_before', before!.file_url)}
-                                                                onRemove={() => handleRemovePhoto(before!)}
-                                                                onFileChange={(e) => handlePhotoSelect(e, cat.key, 'photo_before')}
-                                                                inputId={`upload-before-${cat.key}`}
-                                                            />
-                                                        )}
-                                                        {showAfterSection && (
-                                                            <PhotoEvidenceCell
-                                                                isDark={isDark}
-                                                                phase="after"
-                                                                isCaptured={!!after}
-                                                                photoUrl={after?.file_url}
-                                                                readonly={afterMode === 'readonly'}
-                                                                onView={() => openPhaseGallery('photo_after', after!.file_url)}
-                                                                onRemove={() => handleRemovePhoto(after!)}
-                                                                onFileChange={(e) => handlePhotoSelect(e, cat.key, 'photo_after')}
-                                                                inputId={`upload-after-${cat.key}`}
-                                                            />
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            )
-                                        })}
+                                    <div className="flex flex-wrap gap-2">
+                                        {photoGroups.map(g => (
+                                            <button
+                                                key={g.key}
+                                                type="button"
+                                                onClick={() => setPhotoGroup(g.key)}
+                                                className={`px-3.5 py-1.5 rounded-full text-[11px] font-extrabold border cursor-pointer transition-colors ${activePhotoGroup === g.key ? 'bg-blue-600 text-white border-blue-600' : isDark ? 'border-slate-700 bg-slate-900 text-slate-400 hover:text-white' : 'border-slate-200 bg-white text-slate-600 hover:text-slate-900'}`}
+                                            >
+                                                {g.label} · {g.count}{g.total ? `/${g.total}` : ''}
+                                            </button>
+                                        ))}
                                     </div>
-                                </div>
-                            )}
 
-                            {/* 3. ADDITIONAL PHOTOS & EVIDENCE */}
-                            {additionalMode !== 'hidden' && (
-                                <div className="pt-8 space-y-4">
-                                    <div className={`border rounded-2xl p-4 sm:p-5 ${innerCard}`}>
-                                        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                                            <div>
-                                                <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-purple-300' : 'text-purple-700'}`}>3. Additional Evidence Photos</h3>
-                                                <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload close-up damage details, part codes, or extra inspection angles.</p>
-                                            </div>
-                                            {additionalMode === 'edit' && (
-                                                <div className="flex gap-2">
-                                                    <label
-                                                        htmlFor="tech-input-additional"
-                                                        className="text-xs bg-purple-600 hover:bg-purple-500 text-white px-3.5 py-1.5 rounded-xl font-bold cursor-pointer shadow inline-block transition-colors"
-                                                    >
-                                                        {uploadingKey ? 'Uploading…' : '📷 Take Photo'}
-                                                    </label>
-                                                    <input
-                                                        id="tech-input-additional"
-                                                        type="file"
-                                                        accept="image/*"
-                                                        capture="environment"
-                                                        className="hidden"
-                                                        onChange={handleAdditionalPhotoSelect}
-                                                    />
-                                                    <label
-                                                        htmlFor="tech-input-additional-file"
-                                                        className={`text-xs px-3.5 py-1.5 rounded-xl font-bold cursor-pointer shadow inline-block transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
-                                                    >
-                                                        {uploadingKey ? 'Uploading…' : '📁 Upload'}
-                                                    </label>
-                                                    <input
-                                                        id="tech-input-additional-file"
-                                                        type="file"
-                                                        accept="image/*"
-                                                        className="hidden"
-                                                        onChange={handleAdditionalPhotoSelect}
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
+                                    {(activePhotoGroup === 'before' || activePhotoGroup === 'after') && (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                                            {PHOTO_CATEGORIES.map((cat) => {
+                                                const mediaType = activePhotoGroup === 'before' ? 'photo_before' : 'photo_after'
+                                                const item = mediaItems.find(m => m.media_type === mediaType && m.category === cat.key)
 
-                                        {additionalPhotos.length === 0 ? (
-                                            <div className={`border border-dashed rounded-xl p-4 text-center text-xs font-medium ${isDark ? 'bg-slate-950/50 border-slate-800 text-slate-500' : 'bg-slate-50 border-slate-300 text-slate-500'}`}>
-                                                {additionalMode === 'edit' ? 'No additional evidence photos uploaded yet. Tap “+ Add Photo” to snap optional extra angles.' : 'No additional evidence photos uploaded by the technician.'}
-                                            </div>
-                                        ) : (
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                {additionalPhotos.map((item) => {
-                                                    const displayTitle = item.category.replace(/^extra_/, '').replace(/_[0-9a-f]{8}$/, '').replace(/_/g, ' ')
-                                                    return (
-                                                        <div key={item.id} className={`border rounded-xl p-3.5 flex flex-col justify-between gap-2.5 ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-white border-slate-200'}`}>
-                                                            <div className="flex items-center justify-between gap-2">
-                                                                <p className={`text-xs font-bold capitalize ${isDark ? 'text-purple-300' : 'text-purple-700'}`}>{displayTitle}</p>
-                                                                <p className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>✓ Extra Evidence</p>
-                                                            </div>
-                                                            <PhotoThumb
-                                                                url={item.file_url}
-                                                                alt={`${selectedVehicle?.plate_number ?? ''} - ${displayTitle}`}
-                                                                onClick={() => openAdditionalGallery(item.file_url)}
-                                                                className="h-40"
+                                                return (
+                                                    <div key={cat.key} className={`border rounded-2xl p-4 sm:p-5 ${innerCard}`}>
+                                                        <p className={`text-xs font-extrabold uppercase mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>{cat.label}</p>
+
+                                                        <div className="grid grid-cols-1 gap-4">
+                                                            <PhotoEvidenceCell
+                                                                isDark={isDark}
+                                                                phase={activePhotoGroup}
+                                                                isCaptured={!!item}
+                                                                photoUrl={item?.file_url}
+                                                                readonly={activePhotoGroup === 'before' ? beforeMode === 'readonly' : afterMode === 'readonly'}
+                                                                onView={() => openPhaseGallery(mediaType, item!.file_url)}
+                                                                onRemove={() => handleRemovePhoto(item!)}
+                                                                onFileChange={(e) => handlePhotoSelect(e, cat.key, mediaType)}
+                                                                inputId={`upload-${activePhotoGroup}-${cat.key}`}
                                                             />
-                                                            {additionalMode === 'edit' && (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => handleRemovePhoto(item)}
-                                                                    className={`text-[11px] px-2.5 py-1.5 rounded-lg font-bold border cursor-pointer ${isDark ? 'bg-rose-950 text-rose-400 border-rose-900' : 'bg-rose-50 text-rose-600 border-rose-200'}`}
-                                                                >
-                                                                    Remove
-                                                                </button>
-                                                            )}
                                                         </div>
-                                                    )
-                                                })}
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+
+                                    {activePhotoGroup === 'additional' && (
+                                        <div className="space-y-4">
+                                            <div className={`border rounded-2xl p-4 sm:p-5 ${innerCard}`}>
+                                                <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                                                    <div>
+                                                        <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-purple-300' : 'text-purple-700'}`}>Additional Evidence Photos</h3>
+                                                        <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload close-up damage details, part codes, or extra inspection angles.</p>
+                                                    </div>
+                                                    {additionalMode === 'edit' && (
+                                                        <div className="flex gap-2">
+                                                            <label
+                                                                htmlFor="tech-input-additional"
+                                                                className="text-xs bg-purple-600 hover:bg-purple-500 text-white px-3.5 py-1.5 rounded-xl font-bold cursor-pointer shadow inline-block transition-colors"
+                                                            >
+                                                                {uploadingKey ? 'Uploading…' : '📷 Take Photo'}
+                                                            </label>
+                                                            <input
+                                                                id="tech-input-additional"
+                                                                type="file"
+                                                                accept="image/*"
+                                                                capture="environment"
+                                                                className="hidden"
+                                                                onChange={handleAdditionalPhotoSelect}
+                                                            />
+                                                            <label
+                                                                htmlFor="tech-input-additional-file"
+                                                                className={`text-xs px-3.5 py-1.5 rounded-xl font-bold cursor-pointer shadow inline-block transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
+                                                            >
+                                                                {uploadingKey ? 'Uploading…' : '📁 Upload'}
+                                                            </label>
+                                                            <input
+                                                                id="tech-input-additional-file"
+                                                                type="file"
+                                                                accept="image/*"
+                                                                className="hidden"
+                                                                onChange={handleAdditionalPhotoSelect}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {additionalPhotos.length === 0 ? (
+                                                    <div className={`border border-dashed rounded-xl p-4 text-center text-xs font-medium ${isDark ? 'bg-slate-950/50 border-slate-800 text-slate-500' : 'bg-slate-50 border-slate-300 text-slate-500'}`}>
+                                                        {additionalMode === 'edit' ? 'No additional evidence photos uploaded yet. Tap “+ Add Photo” to snap optional extra angles.' : 'No additional evidence photos uploaded by the technician.'}
+                                                    </div>
+                                                ) : (
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                        {additionalPhotos.map((item) => {
+                                                            const displayTitle = item.category.replace(/^extra_/, '').replace(/_[0-9a-f]{8}$/, '').replace(/_/g, ' ')
+                                                            return (
+                                                                <div key={item.id} className={`border rounded-xl p-3.5 flex flex-col justify-between gap-2.5 ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-white border-slate-200'}`}>
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <p className={`text-xs font-bold capitalize ${isDark ? 'text-purple-300' : 'text-purple-700'}`}>{displayTitle}</p>
+                                                                        <p className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>✓ Extra Evidence</p>
+                                                                    </div>
+                                                                    <PhotoThumb
+                                                                        url={item.file_url}
+                                                                        alt={`${selectedVehicle?.plate_number ?? ''} - ${displayTitle}`}
+                                                                        onClick={() => openAdditionalGallery(item.file_url)}
+                                                                        className="h-40"
+                                                                    />
+                                                                    {additionalMode === 'edit' && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleRemovePhoto(item)}
+                                                                            className={`text-[11px] px-2.5 py-1.5 rounded-lg font-bold border cursor-pointer ${isDark ? 'bg-rose-950 text-rose-400 border-rose-900' : 'bg-rose-50 text-rose-600 border-rose-200'}`}
+                                                                        >
+                                                                            Remove
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                )}
                                             </div>
-                                        )}
-                                    </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </Card>
