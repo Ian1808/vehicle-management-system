@@ -10,6 +10,8 @@ import EmptyState from '@/components/ui/EmptyState'
 import StatusBadge from '@/components/ui/StatusBadge'
 import CompanyNameModal from '@/components/ui/CompanyNameModal'
 import VehicleEditModal, { type VehicleEditPayload } from '@/components/admin/VehicleEditModal'
+import FrontDeskModule from '@/modules/FrontDeskModule'
+import TechnicianModule from '@/modules/TechnicianModule'
 
 type ToastState = { message: string; type: 'success' | 'error' } | null
 
@@ -42,6 +44,14 @@ const STATUS_FLOW_LABELS: Record<string, string> = {
     road_ready: 'Road Ready',
 }
 
+// Accordion sections for the Manager page. Front Desk + Technician work is
+// embedded here so the manager never needs to leave this page.
+const SECTIONS = [
+    { key: 'overview', icon: '📊', short: 'Overview', title: 'Company Overview', hint: 'Financials, fleet & staff at a glance' },
+    { key: 'fleet', icon: '📋', short: 'Front Desk', title: 'Front Desk Work', hint: 'Intake, vehicle queue, documents, costs' },
+    { key: 'workshop', icon: '🔧', short: 'Workshop', title: 'Workshop & Repair', hint: 'Repair stages & photo evidence' },
+] as const
+
 export default function ManagerDashboardModule({ embedded = false }: { embedded?: boolean }) {
     const { isDark } = useTheme()
     const [loading, setLoading] = useState(true)
@@ -54,6 +64,9 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
     const [staff, setStaff] = useState<CompanyStaff[]>([])
     const [editCompanyOpen, setEditCompanyOpen] = useState(false)
     const [editingVehicle, setEditingVehicle] = useState<CompanyVehicle | null>(null)
+    // Accordion sections: compact cards, click to expand (same as Admin)
+    const [activeSection, setActiveSection] = useState('overview')
+    const [collapsed, setCollapsed] = useState(false)
 
     const supabase = useMemo(() => createClient(), [])
 
@@ -256,7 +269,7 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                     title={role === 'admin' ? `Manager Dashboard — ${companyName || 'Select a company'}` : `Company Overview — ${companyName || 'My Company'}`}
                     subtitle={role === 'admin'
                         ? 'Admin preview: inspect any company\'s fleet, staff, and financials. All data below is scoped to the selected company.'
-                        : "Your company's fleet, staff, and financials at a glance. Work is split across Front Desk, Technicians, and Staff Management."}
+                        : "Your company's fleet, staff, and financials at a glance. Everything is managed right here — intake, repairs, and vehicles."}
                     right={
                         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                             {companySelector}
@@ -272,14 +285,62 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                     }
                 />
 
+                {/* Section picker — compact cards, click to expand (accordion, same as Admin) */}
+                <div className="mb-6 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {SECTIONS.map((sec) => {
+                        const open = activeSection === sec.key && !collapsed
+                        const badge = sec.key === 'overview' || sec.key === 'fleet' ? fleetStats.total : fleetStats.in_repair
+                        return (
+                            <button
+                                key={sec.key}
+                                type="button"
+                                onClick={() => {
+                                    if (activeSection === sec.key) {
+                                        setCollapsed(!collapsed)
+                                    } else {
+                                        setActiveSection(sec.key)
+                                        setCollapsed(false)
+                                    }
+                                }}
+                                className={`group rounded-xl border px-3 py-2.5 text-left transition-all cursor-pointer ${
+                                    open
+                                        ? 'bg-purple-600 border-purple-500 text-white shadow-md'
+                                        : isDark
+                                            ? 'bg-slate-900 border-slate-700 hover:border-purple-500 text-slate-200'
+                                            : 'bg-white border-slate-200 hover:border-purple-400 text-slate-700 shadow-sm'
+                                }`}
+                                title={`${sec.icon} ${sec.title} — click to expand`}
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="flex items-center gap-1.5 min-w-0">
+                                        <span className="text-base leading-none shrink-0">{sec.icon}</span>
+                                        <span className="text-[13px] font-extrabold truncate">{sec.short}</span>
+                                    </span>
+                                    <span className={`text-[10px] font-bold rounded-md px-1.5 py-0.5 shrink-0 ${open ? 'bg-white/20 text-white' : isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>{badge}</span>
+                                </div>
+                                <div className={`mt-1.5 flex items-center justify-between text-[10px] font-semibold ${open ? 'text-purple-100' : isDark ? 'text-slate-400' : 'text-slate-400'}`}>
+                                    <span className="truncate">{open ? 'Click to collapse' : 'Click to expand'}</span>
+                                    <span className={`shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▾</span>
+                                </div>
+                            </button>
+                        )
+                    })}
+                </div>
+
                 {loading ? (
                     <EmptyState isDark={isDark} message="Loading your company dashboard..." />
                 ) : !viewCompanyId ? (
                     <Card isDark={isDark} className="p-8">
                         <EmptyState isDark={isDark} message="No company selected. Create a company in the Admin Hub first." />
                     </Card>
+                ) : collapsed ? (
+                    <div className={`rounded-2xl border-2 border-dashed px-6 py-12 text-center text-xs font-semibold ${isDark ? 'border-slate-700 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
+                        All sections are collapsed. Click a card above to open its contents.
+                    </div>
                 ) : (
                     <>
+                    {activeSection === 'overview' && (
+                        <>
                         {/* Financial summary */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                             {[
@@ -339,16 +400,16 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                             <Card isDark={isDark} className="p-6 shadow-lg flex flex-col">
                                 <h3 className={`text-sm font-black tracking-tight mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>⚡ Manager Quick Actions</h3>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <button onClick={() => window.location.href = '/?tab=frontdesk'} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
+                                    <button onClick={() => { setActiveSection('fleet'); setCollapsed(false) }} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
                                         📋 Front Desk Work<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Intake & vehicle queue</span>
                                     </button>
                                     <button onClick={() => window.location.href = '/?tab=staff'} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
                                         👥 Manage Staff<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Add / edit / suspend accounts</span>
                                     </button>
-                                    <button onClick={() => window.location.href = '/?tab=technician'} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
-                                        🔧 Technician Portal<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Workshop photo queue</span>
+                                    <button onClick={() => { setActiveSection('workshop'); setCollapsed(false) }} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
+                                        🔧 Workshop & Repair<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Stages & photo evidence</span>
                                     </button>
-                                    <button onClick={() => window.location.href = '/?tab=frontdesk'} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
+                                    <button onClick={() => { setActiveSection('fleet'); setCollapsed(false) }} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
                                         🚗 Add Vehicle<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Register a new vehicle</span>
                                     </button>
                                 </div>
@@ -374,7 +435,13 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                                         </div>
                                         <div className="mt-4 flex gap-2">
                                             <button
-                                                onClick={() => window.location.href = `/?tab=frontdesk&vehicle=${v.id}`}
+                                                onClick={() => {
+                                                    const url = new URL(window.location.href)
+                                                    url.searchParams.set('vehicle', v.id)
+                                                    window.history.replaceState(null, '', url.pathname + url.search)
+                                                    setActiveSection('fleet')
+                                                    setCollapsed(false)
+                                                }}
                                                 className="flex-1 bg-purple-600 hover:bg-purple-500 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
                                             >
                                                 Open Vehicle →
@@ -392,6 +459,10 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                                 ))}
                             </div>
                         )}
+                        </>
+                    )}
+                    {activeSection === 'fleet' && <FrontDeskModule embedded />}
+                    {activeSection === 'workshop' && <TechnicianModule embedded />}
                     </>
                 )}
             </main>

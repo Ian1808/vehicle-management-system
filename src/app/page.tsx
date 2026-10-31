@@ -23,7 +23,7 @@ const ROLE_MODULES: Record<string, string> = {
 
 const ALLOWED_TABS: Record<string, string[]> = {
     admin: ['admin'], // Admin works from the Admin page only; "Log in as" in Users lets them preview other modules
-    manager: ['manager', 'panels', 'staff', 'frontdesk', 'technician'],
+    manager: ['manager', 'panels', 'staff'], // Front Desk + Technician work happens inside the Manager page (accordion sections)
     front_desk: ['frontdesk'],
     technician: ['technician'],
 }
