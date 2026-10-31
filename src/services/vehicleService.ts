@@ -40,7 +40,6 @@ export async function insertVehicle(vehicleData: {
     insurance_panel?: string
     intake_cost?: number
     market_value?: number
-    repair_cost?: number
     created_by?: string | null
     company_id?: string | null
     // UI-only payload keys carried by the intake modal; never sent to PostgREST.
@@ -58,10 +57,10 @@ export async function insertVehicle(vehicleData: {
             insurance_panel: vehicleData.insurance_panel,
             intake_cost: vehicleData.intake_cost,
             market_value: vehicleData.market_value,
-            repair_cost: vehicleData.repair_cost ?? 0,
             created_by: vehicleData.created_by,
             company_id: vehicleData.company_id,
             status: 'intake',
+            repair_cost: 0,
         }
     ]).select('id').single()
 

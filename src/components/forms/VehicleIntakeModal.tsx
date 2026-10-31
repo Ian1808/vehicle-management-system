@@ -318,7 +318,6 @@ type Props = {
         insurance_panel: string
         intake_cost: number
         market_value: number
-        repair_cost: number
         grantFile?: File | null
         ocrScan?: OcrScanPayload | null
         companyId?: string | null
@@ -344,7 +343,6 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
     const [marketVal, setMarketVal] = useState('')
     const [insurancePanel, setInsurancePanel] = useState('')
     const [intakeCost, setIntakeCost] = useState('')
-    const [repairCost, setRepairCost] = useState('')
     const [ocrBusy, setOcrBusy] = useState(false)
     const [ocrStatus, setOcrStatus] = useState('')
     const [ocrPass, setOcrPass] = useState(0)
@@ -377,7 +375,6 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
         setMarketVal('')
         setInsurancePanel('')
         setIntakeCost('')
-        setRepairCost('')
         setManualOverride(false)
         setOcrFields(null)
         setOcrInspect(null)
@@ -597,7 +594,6 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
             insurance_panel: insurancePanel,
             intake_cost: intakeCost ? parseFloat(intakeCost) : 0,
             market_value: marketVal ? parseFloat(marketVal) : 0,
-            repair_cost: repairCost ? parseFloat(repairCost) : 0,
             grantFile,
             ocrScan,
             companyId: fixedCompanyId || companyId || null,
@@ -861,7 +857,7 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                         <input type="text" placeholder="e.g. Allianz General" value={insurancePanel} onChange={(e) => setInsurancePanel(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium ${inputBgClass}`} />
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Intake Cost (RM)</label>
                             <input type="number" step="0.01" placeholder="0.00" value={intakeCost} onChange={(e) => setIntakeCost(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium ${inputBgClass}`} />
@@ -869,10 +865,6 @@ export default function VehicleIntakeModal({ isOpen, onClose, onSubmit, isDark, 
                         <div>
                             <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Market Value (RM)</label>
                             <input type="number" step="0.01" placeholder="0.00" value={marketVal} onChange={(e) => setMarketVal(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium ${inputBgClass}`} />
-                        </div>
-                        <div>
-                            <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Repair Cost (RM)</label>
-                            <input type="number" step="0.01" placeholder="0.00" value={repairCost} onChange={(e) => setRepairCost(e.target.value)} className={`w-full border rounded-xl p-3 text-xs font-medium ${inputBgClass}`} />
                         </div>
                     </div>
 

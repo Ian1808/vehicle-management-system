@@ -47,9 +47,10 @@ type ConfirmState = {
   message: string
   confirmText?: string
   confirmVariant?: 'primary' | 'danger' | 'success'
-  onConfirm: () => void
+  onConfirm?: () => void
 } | null
 type PreviewState = { items: { url: string; title: string }[]; index: number } | null
+type CostField = 'intake_cost' | 'market_value' | 'repair_cost'
 
 const DOCUMENT_CATEGORIES = ['grant', 'jpj', 'insurance', 'ber'] as const
 
@@ -88,6 +89,10 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
   const [confirmModal, setConfirmModal] = useState<ConfirmState>(null)
   const [previewMedia, setPreviewMedia] = useState<PreviewState>(null)
   const [detailTab, setDetailTab] = useState<'overview' | 'documents' | 'photos' | 'workshop'>('overview')
+  // Cost edits (intake / market / repair) open a modal popup, then a confirm modal before saving.
+  const [costEdit, setCostEdit] = useState<{ field: CostField; label: string; value: string } | null>(null)
+  const [pendingCostSave, setPendingCostSave] = useState<{ field: CostField; label: string; amount: number } | null>(null)
+  const [costSaving, setCostSaving] = useState(false)
   const [photoFilter, setPhotoFilter] = useState<'before' | 'after' | 'additional'>('before')
   const { isDark } = useTheme()
 
@@ -193,7 +198,6 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
     insurance_panel: string
     intake_cost: number
     market_value: number
-    repair_cost: number
     grantFile?: File | null
     ocrScan?: OcrScanPayload | null
     companyId?: string | null
@@ -390,6 +394,70 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
     })
   }
 
+  function currentCostValue(field: CostField): number {
+    if (!selectedVehicle) return 0
+    return field === 'intake_cost' ? Number(selectedVehicle.intake_cost || 0)
+      : field === 'market_value' ? Number(selectedVehicle.market_value || 0)
+      : Number(selectedVehicle.repair_cost || 0)
+  }
+
+  // Step 1: open the value-entry modal popup.
+  function openCostEdit(field: CostField, label: string) {
+    if (!selectedVehicle) return
+    const current = currentCostValue(field)
+    setCostEdit({ field, label, value: current ? String(current) : '' })
+  }
+
+  // Step 2: validate, close the popup, and open the confirm modal.
+  function continueCostEdit() {
+    if (!costEdit) return
+    const amount = parseFloat(costEdit.value)
+    if (Number.isNaN(amount) || amount < 0) {
+      showToast('Enter a valid amount.', 'error')
+      return
+    }
+    const oldValue = currentCostValue(costEdit.field)
+    setPendingCostSave({ field: costEdit.field, label: costEdit.label, amount })
+    setCostEdit(null)
+    setConfirmModal({
+      title: `Update ${costEdit.label}`,
+      message: `Change ${costEdit.label.toLowerCase()} for ${selectedVehicle?.plate_number} from RM ${oldValue.toLocaleString()} to RM ${amount.toLocaleString()}?`,
+      confirmText: 'Save Change',
+      confirmVariant: 'success',
+    })
+  }
+
+  // Step 3: persist after the user confirms.
+  async function handleConfirmCostSave() {
+    if (!selectedVehicle || !pendingCostSave) return
+    const { field, label, amount } = pendingCostSave
+    setCostSaving(true)
+    try {
+      const patch: { intake_cost?: number; market_value?: number; repair_cost?: number } =
+        field === 'intake_cost' ? { intake_cost: amount }
+          : field === 'market_value' ? { market_value: amount }
+          : { repair_cost: amount }
+
+      const { error } = await supabase
+        .from('vehicles')
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq('id', selectedVehicle.id)
+
+      if (error) throw error
+
+      showToast(`${label} updated!`, 'success')
+      setSelectedVehicle({ ...selectedVehicle, ...patch })
+      const list = await fetchActiveVehicles(userRole === 'admin' ? null : userCompanyId)
+      setVehicles(list)
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update cost', 'error')
+    } finally {
+      setCostSaving(false)
+      setPendingCostSave(null)
+      setConfirmModal(null)
+    }
+  }
+
   async function handleDownload(url: string, title: string) {
     try {
       const res = await fetch(url)
@@ -447,10 +515,45 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
           message={confirmModal.message}
           confirmText={confirmModal.confirmText}
           confirmVariant={confirmModal.confirmVariant}
-          onConfirm={confirmModal.onConfirm}
-          onCancel={() => setConfirmModal(null)}
+          onConfirm={confirmModal.onConfirm ?? (() => handleConfirmCostSave())}
+          onCancel={() => { setConfirmModal(null); setPendingCostSave(null) }}
           isDark={isDark}
         />
+      )}
+      {costEdit && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`border rounded-3xl shadow-2xl max-w-sm w-full p-6 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
+            <h3 className="text-lg font-extrabold mb-1">✏️ Edit {costEdit.label}</h3>
+            <p className={`text-xs mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Set the {costEdit.label.toLowerCase()} for {selectedVehicle?.plate_number}.</p>
+            <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{costEdit.label} (RM)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0.00"
+              value={costEdit.value}
+              onChange={(e) => setCostEdit({ ...costEdit, value: e.target.value })}
+              autoFocus
+              className={`w-full border rounded-xl p-3 text-sm font-bold ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'}`}
+            />
+            <div className="flex justify-end gap-3 pt-5">
+              <button
+                type="button"
+                onClick={() => setCostEdit(null)}
+                className={`px-5 py-2.5 rounded-xl text-xs font-bold cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={continueCostEdit}
+                className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow-lg shadow-blue-500/20"
+              >
+                Continue →
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} onNavigate={(index) => setPreviewMedia(prev => (prev ? { ...prev, index } : prev))} isDark={isDark} />
 
@@ -547,14 +650,37 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
                     <div className={`p-3 sm:p-5 rounded-2xl border ${innerCard}`}>
                       <p className="text-[9px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wide"><span className="hidden sm:inline">Intake Cost</span><span className="sm:hidden">Intake</span></p>
                       <p className={`text-lg sm:text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.intake_cost?.toLocaleString()}</p>
+                      <button
+                        type="button"
+                        onClick={() => openCostEdit('intake_cost', 'Intake Cost')}
+                        className="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white px-2 py-1.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer"
+                      >
+                        ✏️ Edit
+                      </button>
                     </div>
                     <div className={`p-3 sm:p-5 rounded-2xl border ${innerCard}`}>
                       <p className="text-[9px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wide"><span className="hidden sm:inline">Market Value</span><span className="sm:hidden">Market</span></p>
                       <p className={`text-lg sm:text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.market_value?.toLocaleString()}</p>
+                      <button
+                        type="button"
+                        onClick={() => openCostEdit('market_value', 'Market Value')}
+                        className="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white px-2 py-1.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer"
+                      >
+                        ✏️ Edit
+                      </button>
                     </div>
                     <div className={`p-3 sm:p-5 rounded-2xl border ${innerCard}`}>
                       <p className="text-[9px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wide"><span className="hidden sm:inline">Total Repair Cost</span><span className="sm:hidden">Repair</span></p>
                       <p className={`text-lg sm:text-2xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.repair_cost?.toLocaleString()}</p>
+                      {(selectedVehicle.status === 'completed' || selectedVehicle.status === 'road_ready') && (
+                        <button
+                          type="button"
+                          onClick={() => openCostEdit('repair_cost', 'Repair Cost')}
+                          className="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white px-2 py-1.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer"
+                        >
+                          ✏️ Edit
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
