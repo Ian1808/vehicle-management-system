@@ -8,7 +8,6 @@ import AccountSettingsModal, { type AccountSettingsPayload } from '@/components/
 import FrontDeskModule from '@/modules/FrontDeskModule'
 import TechnicianModule from '@/modules/TechnicianModule'
 import AdminModule from '@/modules/AdminModule'
-import ManagerStaffModule from '@/modules/ManagerStaffModule'
 import ManagerDashboardModule from '@/modules/ManagerDashboardModule'
 import ManagerPanelBanksModule from '@/modules/ManagerPanelBanksModule'
 
@@ -23,7 +22,7 @@ const ROLE_MODULES: Record<string, string> = {
 
 const ALLOWED_TABS: Record<string, string[]> = {
     admin: ['admin'], // Admin works from the Admin page only; "Log in as" in Users lets them preview other modules
-    manager: ['manager', 'panels', 'staff'], // Front Desk + Technician work happens inside the Manager page (accordion sections)
+    manager: ['manager', 'settings'], // Staff + vehicles are handled inside the Manager page; Panel Banks & company details live under Company Settings
     front_desk: ['frontdesk'],
     technician: ['technician'],
 }
@@ -31,8 +30,7 @@ const ALLOWED_TABS: Record<string, string[]> = {
 const TAB_META: Record<string, { label: string; icon: string }> = {
     admin: { label: 'Admin Hub', icon: '🛡️' },
     manager: { label: 'Manager Dashboard', icon: '🏢' },
-    panels: { label: 'Panel Banks & Insurance', icon: '🏦' },
-    staff: { label: 'Company Staff', icon: '👥' },
+    settings: { label: 'Company Settings', icon: '⚙️' },
     frontdesk: { label: 'Front Desk', icon: '📋' },
     technician: { label: 'Technician Portal', icon: '🔧' },
 }
@@ -41,8 +39,7 @@ const TAB_META: Record<string, { label: string; icon: string }> = {
 const MOBILE_TAB_LABELS: Record<string, string> = {
     admin: 'Admin',
     manager: 'Manager',
-    panels: 'Panels',
-    staff: 'Staff',
+    settings: 'Company Settings',
     frontdesk: 'Front Desk',
     technician: 'Technician',
 }
@@ -333,8 +330,11 @@ export default function MainDashboard() {
                 <>
             {tab === 'admin' && <AdminModule />}
             {tab === 'manager' && <ManagerDashboardModule />}
-            {tab === 'panels' && <ManagerPanelBanksModule />}
-            {tab === 'staff' && <ManagerStaffModule />}
+            {tab === 'settings' && (
+                <>
+                    <ManagerPanelBanksModule />
+                </>
+            )}
             {tab === 'frontdesk' && <FrontDeskModule />}
             {tab === 'technician' && <TechnicianModule />}
                 </>

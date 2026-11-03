@@ -71,7 +71,12 @@ function additionalLabel(category: string): string {
   return category.replace(/^extra_/, '').replace(/_[a-f0-9]{8}$/i, '').replace(/_/g, ' ')
 }
 
-export default function FrontDeskModule({ embedded = false }: { embedded?: boolean }) {
+export default function FrontDeskModule({ embedded = false, detailOnly = false, initialVehicleId = null, onExit }: {
+  embedded?: boolean
+  detailOnly?: boolean
+  initialVehicleId?: string | null
+  onExit?: () => void
+}) {
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
@@ -155,13 +160,13 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
         const list = await fetchActiveVehicles(userData?.role === 'admin' ? null : (userData?.company_id || null))
         setVehicles(list)
 
-        // Deep-link: open a specific vehicle directly (?tab=frontdesk&vehicle=<id>)
+        // Deep-link: open a specific vehicle directly (?tab=frontdesk&vehicle=<id>, or initialVehicleId prop)
         const params = new URLSearchParams(window.location.search)
-        const vehicleParam = params.get('vehicle')
+        const vehicleParam = params.get('vehicle') || initialVehicleId
         if (vehicleParam && list) {
           const target = list.find(v => v.id === vehicleParam)
           if (target) setSelectedVehicle(target)
-          // Consume the param so it doesn't re-open on later visits
+          // Consume the URL param so it doesn't re-open on later visits
           const url = new URL(window.location.href)
           url.searchParams.delete('vehicle')
           window.history.replaceState(null, '', url.pathname + url.search)
@@ -562,8 +567,14 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
         {selectedVehicle ? (
           <div>
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-              <button onClick={() => { setSelectedVehicle(null); const url = new URL(window.location.href); url.searchParams.delete('vehicle'); window.history.replaceState(null, '', url.pathname + url.search) }} className={`text-xs font-bold px-3.5 py-2 rounded-xl border cursor-pointer ${isDark ? 'border-slate-800 bg-slate-950 text-blue-400' : 'border-slate-200 bg-white text-blue-600'}`}>
-                &larr; Back to Registry
+              <button onClick={() => {
+                if (detailOnly) { onExit?.(); return }
+                setSelectedVehicle(null)
+                const url = new URL(window.location.href)
+                url.searchParams.delete('vehicle')
+                window.history.replaceState(null, '', url.pathname + url.search)
+              }} className={`text-xs font-bold px-3.5 py-2 rounded-xl border cursor-pointer ${isDark ? 'border-slate-800 bg-slate-950 text-blue-400' : 'border-slate-200 bg-white text-blue-600'}`}>
+                {detailOnly ? '← Back to Fleet' : '← Back to Registry'}
               </button>
             </div>
 
@@ -816,7 +827,7 @@ export default function FrontDeskModule({ embedded = false }: { embedded?: boole
               )}
             </Card>
           </div>
-        ) : (
+        ) : detailOnly ? null : (
           <div>
             <SectionHeading
               isDark={isDark}

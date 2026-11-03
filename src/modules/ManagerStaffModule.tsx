@@ -281,7 +281,7 @@ export default function ManagerStaffModule({ embedded = false }: { embedded?: bo
                 />
             )}
 
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-6">
                 <SectionHeading
                     isDark={isDark}
                     title={`Company Staff — ${companyName || 'My Company'}`}
@@ -294,14 +294,14 @@ export default function ManagerStaffModule({ embedded = false }: { embedded?: bo
                     </Card>
                 ) : (
                     <>
-                        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-                            <div className={`border rounded-2xl px-4 py-3 ${innerCard}`}>
-                                <p className={`text-[11px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Staff under your company</p>
-                                <p className="text-2xl font-black text-purple-400">{staff.length}</p>
+                        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                            <div className={`border rounded-xl px-3 py-2 ${innerCard}`}>
+                                <p className={`text-[10px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Staff under your company</p>
+                                <p className="text-xl font-black text-purple-400">{staff.length}</p>
                             </div>
                             <button
                                 onClick={() => setShowUserModal(true)}
-                                className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow-md transition-all cursor-pointer"
+                                className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs shadow-md transition-all cursor-pointer"
                             >
                                 + Add Staff Member
                             </button>
@@ -384,41 +384,39 @@ export default function ManagerStaffModule({ embedded = false }: { embedded?: bo
                                     </ResponsiveTable>
                                 </div>
 
-                                <div className="md:hidden space-y-3">
+                                <div className="md:hidden space-y-2">
                                     {staff.map((u) => (
-                                        <div key={u.id} className={`border rounded-2xl p-4 flex flex-col gap-3 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                                        <div key={u.id} className={`border rounded-xl p-3 flex flex-col gap-1.5 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                                             <div className="flex items-start justify-between gap-2">
                                                 <div className="min-w-0">
-                                                    <p className={`font-black text-sm truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{u.full_name || 'N/A'}</p>
-                                                    <p className={`text-[11px] font-mono truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>@{u.username} {u.email ? `• ${u.email}` : ''}</p>
+                                                    <p className={`font-black text-xs truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{u.full_name || 'N/A'}</p>
+                                                    <p className={`text-[10px] font-mono truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>@{u.username} {u.email ? `• ${u.email}` : ''}</p>
                                                 </div>
-                                                <span className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${u.is_suspended
+                                                <span className={`shrink-0 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase border ${u.is_suspended
                                                     ? isDark ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-rose-50 text-rose-700 border-rose-200'
                                                     : isDark ? 'bg-emerald-950 text-emerald-300 border-emerald-800' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                                     }`}>
                                                     {u.is_suspended ? 'Suspended' : 'Active'}
                                                 </span>
                                             </div>
-                                            <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                                Last login: {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never logged in'}
+                                            <p className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                {u.role === 'front_desk' ? 'Front Desk' : 'Technician'}
+                                                {u.role === 'technician' && (u.technician_type === 'third_party'
+                                                    ? ` • 3rd-Party${u.specialty ? ` • ${u.specialty}` : ''}`
+                                                    : ' • In-House')}
+                                                {' • Last login: '}{u.last_login ? new Date(u.last_login).toLocaleString() : 'Never logged in'}
                                             </p>
-                                            <p className={`text-xs font-black capitalize ${isDark ? 'text-white' : 'text-slate-900'}`}>{u.role === 'front_desk' ? 'Front Desk' : 'Technician'}</p>
-                                            {u.role === 'technician' && (
-                                                <p className={`text-[10px] font-bold ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>
-                                                    {u.technician_type === 'third_party' ? `3rd-Party • ${u.specialty || 'No specialty'}` : 'In-House'}
-                                                </p>
-                                            )}
-                                            <div className="flex flex-wrap gap-2">
+                                            <div className="flex gap-1.5">
                                                 <button
                                                     onClick={() => setEditingUser(u)}
-                                                    className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
+                                                    className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-bold border cursor-pointer transition-colors ${isDark ? 'bg-purple-950 hover:bg-purple-900 text-purple-300 border-purple-800' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}`}
                                                     title="Edit all user details"
                                                 >
                                                     ✏️ Edit
                                                 </button>
                                                 <button
                                                     onClick={() => handleToggleSuspendUser(u.id, Boolean(u.is_suspended), u.full_name)}
-                                                    className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${u.is_suspended
+                                                    className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-bold border cursor-pointer transition-colors ${u.is_suspended
                                                         ? isDark ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
                                                         : isDark ? 'bg-amber-950 hover:bg-amber-900 text-amber-300 border-amber-800' : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
                                                         }`}
@@ -428,7 +426,7 @@ export default function ManagerStaffModule({ embedded = false }: { embedded?: bo
                                                 </button>
                                                 <button
                                                     onClick={() => handleDeleteUser(u.id, u.full_name)}
-                                                    className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
+                                                    className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
                                                     title="Remove Account"
                                                 >
                                                     🗑️

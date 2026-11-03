@@ -11,7 +11,7 @@ import StatusBadge from '@/components/ui/StatusBadge'
 import CompanyNameModal from '@/components/ui/CompanyNameModal'
 import VehicleEditModal, { type VehicleEditPayload } from '@/components/admin/VehicleEditModal'
 import FrontDeskModule from '@/modules/FrontDeskModule'
-import TechnicianModule from '@/modules/TechnicianModule'
+import ManagerStaffModule from '@/modules/ManagerStaffModule'
 
 type ToastState = { message: string; type: 'success' | 'error' } | null
 
@@ -44,27 +44,6 @@ const STATUS_FLOW_LABELS: Record<string, string> = {
     road_ready: 'Road Ready',
 }
 
-// Stacked sections for the Manager page. Front Desk + Technician work is
-// embedded here so the manager never needs to leave this page.
-const SECTIONS = [
-    { key: 'overview', icon: '📊', short: 'Overview', title: 'Company Overview', hint: 'Financials, fleet & staff at a glance' },
-    { key: 'fleet', icon: '📋', short: 'Front Desk', title: 'Front Desk Work', hint: 'Intake, vehicle queue, documents, costs' },
-    { key: 'workshop', icon: '🔧', short: 'Workshop', title: 'Workshop & Repair', hint: 'Repair stages & photo evidence' },
-] as const
-
-function SectionBar({ icon, title, hint, badge, isDark }: { icon: string; title: string; hint: string; badge: number; isDark: boolean }) {
-    return (
-        <div className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 mb-4 ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
-            <span className="flex items-center gap-2 min-w-0">
-                <span className="text-base leading-none shrink-0">{icon}</span>
-                <span className="text-[13px] font-extrabold truncate">{title}</span>
-                <span className={`hidden sm:inline text-[10px] font-semibold truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{hint}</span>
-            </span>
-            <span className={`text-[10px] font-bold rounded-md px-1.5 py-0.5 shrink-0 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>{badge}</span>
-        </div>
-    )
-}
-
 export default function ManagerDashboardModule({ embedded = false }: { embedded?: boolean }) {
     const { isDark } = useTheme()
     const [loading, setLoading] = useState(true)
@@ -77,16 +56,12 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
     const [staff, setStaff] = useState<CompanyStaff[]>([])
     const [editCompanyOpen, setEditCompanyOpen] = useState(false)
     const [editingVehicle, setEditingVehicle] = useState<CompanyVehicle | null>(null)
-    // Stacked layout: all three sections render together. Nonce remounts the
-    // embedded Front Desk module so a deep-link (?vehicle=<id>) re-opens it.
-    const [frontDeskNonce, setFrontDeskNonce] = useState(0)
+    // Opening a fleet vehicle renders its full detail directly in place (no redirect to Front Desk)
+    const [detailVehicleId, setDetailVehicleId] = useState<string | null>(null)
+    // Staff management renders inside the dashboard too (no jump to Company Settings)
+    const [staffOpen, setStaffOpen] = useState(false)
 
     const supabase = useMemo(() => createClient(), [])
-
-    function scrollToSection(id: string) {
-        const el = document.getElementById(id)
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }
 
     function showToast(message: string, type: 'success' | 'error') {
         setToast({ message, type })
@@ -282,26 +257,28 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
             {toast && <Toast message={toast.message} type={toast.type} isDark={isDark} />}
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-                <SectionHeading
-                    isDark={isDark}
-                    title={role === 'admin' ? `Manager Dashboard — ${companyName || 'Select a company'}` : `Company Overview — ${companyName || 'My Company'}`}
-                    subtitle={role === 'admin'
-                        ? 'Admin preview: inspect any company\'s fleet, staff, and financials. All data below is scoped to the selected company.'
-                        : "Your company's fleet, staff, and financials at a glance. Everything is managed right here — intake, repairs, and vehicles."}
-                    right={
-                        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                            {companySelector}
-                            {role === 'admin' && viewCompanyId && (
-                                <button
-                                    onClick={() => setEditCompanyOpen(true)}
-                                    className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2.5 rounded-2xl text-xs font-bold shadow-lg transition-all cursor-pointer whitespace-nowrap"
-                                >
-                                    ✏️ Edit Company
-                                </button>
-                            )}
-                        </div>
-                    }
-                />
+                {!detailVehicleId && !staffOpen && (
+                    <SectionHeading
+                        isDark={isDark}
+                        title={role === 'admin' ? `Manager Dashboard — ${companyName || 'Select a company'}` : `Company Overview — ${companyName || 'My Company'}`}
+                        subtitle={role === 'admin'
+                            ? 'Admin preview: inspect any company\'s fleet, staff, and financials. All data below is scoped to the selected company.'
+                            : "Your company's fleet, staff, and financials at a glance. Everything is managed right here — intake, repairs, and vehicles."}
+                        right={
+                            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                                {companySelector}
+                                {role === 'admin' && viewCompanyId && (
+                                    <button
+                                        onClick={() => setEditCompanyOpen(true)}
+                                        className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2.5 rounded-2xl text-xs font-bold shadow-lg transition-all cursor-pointer whitespace-nowrap"
+                                    >
+                                        ✏️ Edit Company
+                                    </button>
+                                )}
+                            </div>
+                        }
+                    />
+                )}
 
                 {loading ? (
                     <EmptyState isDark={isDark} message="Loading your company dashboard..." />
@@ -309,84 +286,82 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                     <Card isDark={isDark} className="p-8">
                         <EmptyState isDark={isDark} message="No company selected. Create a company in the Admin Hub first." />
                     </Card>
+                ) : detailVehicleId ? (
+                    <FrontDeskModule
+                        key={detailVehicleId}
+                        embedded
+                        detailOnly
+                        initialVehicleId={detailVehicleId}
+                        onExit={() => setDetailVehicleId(null)}
+                    />
+                ) : staffOpen ? (
+                    <>
+                        <div className="mb-4">
+                            <button onClick={() => setStaffOpen(false)} className={`text-xs font-bold px-3.5 py-2 rounded-xl border cursor-pointer ${isDark ? 'border-slate-800 bg-slate-950 text-blue-400' : 'border-slate-200 bg-white text-blue-600'}`}>
+                                ← Back to Dashboard
+                            </button>
+                        </div>
+                        <ManagerStaffModule embedded />
+                    </>
                 ) : (
                     <>
-                    <section id="mgr-overview" className="mb-10 scroll-mt-24">
-                        <SectionBar icon="📊" title="Company Overview" hint="Financials, fleet & staff at a glance" badge={fleetStats.total} isDark={isDark} />
-                        {/* Financial summary */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                        {/* Financial summary — compact cards so more fits on a page */}
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-4">
                             {[
                                 { label: 'Total Intake Cost', value: intake, color: 'text-rose-400' },
                                 { label: 'Repair Outlay', value: repair, color: 'text-amber-400' },
                                 { label: 'Market Value', value: market, color: 'text-blue-400' },
                                 { label: 'Projected Net Profit', value: profit, color: 'text-emerald-400' },
                             ].map((s) => (
-                                <Card key={s.label} isDark={isDark} className="p-5 shadow-lg">
-                                    <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">{s.label}</p>
-                                    <p className={`text-xl font-black ${s.color}`}>RM {s.value.toLocaleString()}</p>
+                                <Card key={s.label} isDark={isDark} className="p-3 shadow-md">
+                                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-0.5 leading-tight">{s.label}</p>
+                                    <p className={`text-base font-black ${s.color}`}>RM {s.value.toLocaleString()}</p>
                                 </Card>
                             ))}
                         </div>
 
-                        {/* Operational + staff KPI strip */}
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                        {/* Operational + staff KPI strip — compact */}
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-4">
                             {[
                                 { label: 'Total Vehicles', value: fleetStats.total, icon: '🚗' },
                                 { label: 'In Repair', value: fleetStats.in_repair, icon: '🔧' },
                                 { label: 'Pending Photos', value: fleetStats.pending_photos, icon: '📷' },
                                 { label: 'Completed', value: fleetStats.completed, icon: '✅' },
                             ].map((s) => (
-                                <Card key={s.label} isDark={isDark} className="p-5 shadow-lg">
-                                    <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">{s.label}</p>
-                                    <p className={`text-xl font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{s.icon} {s.value}</p>
+                                <Card key={s.label} isDark={isDark} className="p-3 shadow-md">
+                                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-0.5 leading-tight">{s.label}</p>
+                                    <p className={`text-base font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{s.icon} {s.value}</p>
                                 </Card>
                             ))}
                         </div>
 
-                        {/* Staff overview + quick actions */}
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                            <Card isDark={isDark} className="p-6 shadow-lg">
-                                <h3 className={`text-sm font-black tracking-tight mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>👥 Your Staff</h3>
-                                <div className="space-y-3">
-                                    {[
-                                        { label: 'Front Desk', value: staffStats.front_desk, color: 'bg-emerald-500' },
-                                        { label: 'In-House Technicians', value: staffStats.inhouse, color: 'bg-amber-500' },
-                                        { label: 'Third-Party Technicians', value: staffStats.third_party, color: 'bg-rose-500' },
-                                    ].map((r) => (
-                                        <div key={r.label}>
-                                            <div className="flex justify-between items-baseline mb-1">
-                                                <span className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{r.label}</span>
-                                                <span className={`text-sm font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{r.value}</span>
-                                            </div>
-                                            <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
-                                                <div className={`h-full rounded-full ${r.color}`} style={{ width: `${(r.value / maxStaffCount) * 100}%` }} />
-                                            </div>
+                        {/* Staff overview — compact, with Manage Staff inline */}
+                        <Card isDark={isDark} className="p-4 shadow-md mb-6">
+                            <h3 className={`text-xs font-black tracking-tight mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>👥 Your Staff</h3>
+                            <div className="space-y-2">
+                                {[
+                                    { label: 'Front Desk', value: staffStats.front_desk, color: 'bg-emerald-500' },
+                                    { label: 'In-House Technicians', value: staffStats.inhouse, color: 'bg-amber-500' },
+                                    { label: 'Third-Party Technicians', value: staffStats.third_party, color: 'bg-rose-500' },
+                                ].map((r) => (
+                                    <div key={r.label}>
+                                        <div className="flex justify-between items-baseline mb-0.5">
+                                            <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{r.label}</span>
+                                            <span className={`text-xs font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{r.value}</span>
                                         </div>
-                                    ))}
-                                    <p className={`pt-3 text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                        {staffStats.total} staff member{staffStats.total === 1 ? '' : 's'} under this company.
-                                    </p>
-                                </div>
-                            </Card>
-
-                            <Card isDark={isDark} className="p-6 shadow-lg flex flex-col">
-                                <h3 className={`text-sm font-black tracking-tight mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>⚡ Manager Quick Actions</h3>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button onClick={() => scrollToSection('mgr-frontdesk')} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
-                                        📋 Front Desk Work<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Intake & vehicle queue</span>
-                                    </button>
-                                    <button onClick={() => window.location.href = '/?tab=staff'} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
-                                        👥 Manage Staff<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Add / edit / suspend accounts</span>
-                                    </button>
-                                    <button onClick={() => scrollToSection('mgr-workshop')} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
-                                        🔧 Workshop & Repair<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Stages & photo evidence</span>
-                                    </button>
-                                    <button onClick={() => scrollToSection('mgr-frontdesk')} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
-                                        🚗 Add Vehicle<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Register a new vehicle</span>
-                                    </button>
-                                </div>
-                            </Card>
-                        </div>
+                                        <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                                            <div className={`h-full rounded-full ${r.color}`} style={{ width: `${(r.value / maxStaffCount) * 100}%` }} />
+                                        </div>
+                                    </div>
+                                ))}
+                                <p className={`pt-2 text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                    {staffStats.total} staff member{staffStats.total === 1 ? '' : 's'} under this company.
+                                </p>
+                                <button onClick={() => setStaffOpen(true)} className={`w-full px-4 py-2.5 rounded-2xl text-[11px] font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
+                                    👥 Manage Staff<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Add / edit / suspend accounts</span>
+                                </button>
+                            </div>
+                        </Card>
 
                         {/* Active company vehicles */}
                         <h3 className={`text-sm font-black tracking-tight mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>🚗 Company Fleet ({fleetStats.total})</h3>
@@ -407,14 +382,7 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                                         </div>
                                         <div className="mt-4 flex gap-2">
                                             <button
-                                                onClick={() => {
-                                                    const url = new URL(window.location.href)
-                                                    url.searchParams.set('vehicle', v.id)
-                                                    window.history.replaceState(null, '', url.pathname + url.search)
-                                                    // Remount the embedded Front Desk module so it re-reads ?vehicle= and opens it
-                                                    setFrontDeskNonce((n) => n + 1)
-                                                    scrollToSection('mgr-frontdesk')
-                                                }}
+                                                onClick={() => setDetailVehicleId(v.id)}
                                                 className="flex-1 bg-purple-600 hover:bg-purple-500 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
                                             >
                                                 Open Vehicle →
@@ -432,15 +400,6 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                                 ))}
                             </div>
                         )}
-                    </section>
-                    <section id="mgr-frontdesk" className="mb-10 scroll-mt-24">
-                        <SectionBar icon="📋" title="Front Desk Work" hint="Intake, vehicle queue, documents, costs" badge={fleetStats.total} isDark={isDark} />
-                        <FrontDeskModule key={frontDeskNonce} embedded />
-                    </section>
-                    <section id="mgr-workshop" className="mb-10 scroll-mt-24">
-                        <SectionBar icon="🔧" title="Workshop & Repair" hint="Repair stages & photo evidence" badge={fleetStats.in_repair} isDark={isDark} />
-                        <TechnicianModule embedded />
-                    </section>
                     </>
                 )}
             </main>
