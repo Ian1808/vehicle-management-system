@@ -303,61 +303,16 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                     }
                 />
 
-                {/* Section picker — compact stacked cards, click to expand (accordion, same as Admin) */}
-                <div className="mb-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {SECTIONS.map((sec) => {
-                        const open = activeSection === sec.key && !collapsed
-                        const badge = sec.key === 'overview' || sec.key === 'fleet' ? fleetStats.total : fleetStats.in_repair
-                        return (
-                            <button
-                                key={sec.key}
-                                type="button"
-                                onClick={() => {
-                                    if (activeSection === sec.key) {
-                                        setCollapsed(!collapsed)
-                                    } else {
-                                        setActiveSection(sec.key)
-                                        setCollapsed(false)
-                                    }
-                                }}
-                                className={`group rounded-xl border px-3 py-2 text-left transition-all cursor-pointer ${
-                                    open
-                                        ? 'bg-purple-600 border-purple-500 text-white shadow-md'
-                                        : isDark
-                                            ? 'bg-slate-900 border-slate-700 hover:border-purple-500 text-slate-200'
-                                            : 'bg-white border-slate-200 hover:border-purple-400 text-slate-700 shadow-sm'
-                                }`}
-                                title={`${sec.icon} ${sec.title} — click to ${open ? 'collapse' : 'expand'}`}
-                            >
-                                <div className="flex items-center justify-between gap-2">
-                                    <span className="flex items-center gap-1.5 min-w-0">
-                                        <span className="text-base leading-none shrink-0">{sec.icon}</span>
-                                        <span className="text-[13px] font-extrabold truncate">{sec.short}</span>
-                                    </span>
-                                    <span className="flex items-center gap-1.5 shrink-0">
-                                        <span className={`text-[10px] font-bold rounded-md px-1.5 py-0.5 ${open ? 'bg-white/20 text-white' : isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>{badge}</span>
-                                        <span className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▾</span>
-                                    </span>
-                                </div>
-                            </button>
-                        )
-                    })}
-                </div>
-
                 {loading ? (
                     <EmptyState isDark={isDark} message="Loading your company dashboard..." />
                 ) : !viewCompanyId ? (
                     <Card isDark={isDark} className="p-8">
                         <EmptyState isDark={isDark} message="No company selected. Create a company in the Admin Hub first." />
                     </Card>
-                ) : collapsed ? (
-                    <div className={`rounded-xl border px-4 py-2 text-center text-[11px] font-semibold ${isDark ? 'border-slate-800 bg-slate-900/40 text-slate-500' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>
-                        ▸ All sections are collapsed — tap a card above to open it.
-                    </div>
                 ) : (
                     <>
-                    {activeSection === 'overview' && (
-                        <>
+                    <section id="mgr-overview" className="mb-10 scroll-mt-24">
+                        <SectionBar icon="📊" title="Company Overview" hint="Financials, fleet & staff at a glance" badge={fleetStats.total} isDark={isDark} />
                         {/* Financial summary */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                             {[
@@ -417,16 +372,16 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                             <Card isDark={isDark} className="p-6 shadow-lg flex flex-col">
                                 <h3 className={`text-sm font-black tracking-tight mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>⚡ Manager Quick Actions</h3>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <button onClick={() => { setActiveSection('fleet'); setCollapsed(false) }} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
+                                    <button onClick={() => scrollToSection('mgr-frontdesk')} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
                                         📋 Front Desk Work<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Intake & vehicle queue</span>
                                     </button>
                                     <button onClick={() => window.location.href = '/?tab=staff'} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
                                         👥 Manage Staff<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Add / edit / suspend accounts</span>
                                     </button>
-                                    <button onClick={() => { setActiveSection('workshop'); setCollapsed(false) }} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
+                                    <button onClick={() => scrollToSection('mgr-workshop')} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
                                         🔧 Workshop & Repair<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Stages & photo evidence</span>
                                     </button>
-                                    <button onClick={() => { setActiveSection('fleet'); setCollapsed(false) }} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
+                                    <button onClick={() => scrollToSection('mgr-frontdesk')} className={`px-4 py-3.5 rounded-2xl text-xs font-bold border transition-all cursor-pointer text-left ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'}`}>
                                         🚗 Add Vehicle<br /><span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Register a new vehicle</span>
                                     </button>
                                 </div>
@@ -456,8 +411,9 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                                                     const url = new URL(window.location.href)
                                                     url.searchParams.set('vehicle', v.id)
                                                     window.history.replaceState(null, '', url.pathname + url.search)
-                                                    setActiveSection('fleet')
-                                                    setCollapsed(false)
+                                                    // Remount the embedded Front Desk module so it re-reads ?vehicle= and opens it
+                                                    setFrontDeskNonce((n) => n + 1)
+                                                    scrollToSection('mgr-frontdesk')
                                                 }}
                                                 className="flex-1 bg-purple-600 hover:bg-purple-500 text-white px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
                                             >
@@ -476,10 +432,15 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                                 ))}
                             </div>
                         )}
-                        </>
-                    )}
-                    {activeSection === 'fleet' && <FrontDeskModule embedded />}
-                    {activeSection === 'workshop' && <TechnicianModule embedded />}
+                    </section>
+                    <section id="mgr-frontdesk" className="mb-10 scroll-mt-24">
+                        <SectionBar icon="📋" title="Front Desk Work" hint="Intake, vehicle queue, documents, costs" badge={fleetStats.total} isDark={isDark} />
+                        <FrontDeskModule key={frontDeskNonce} embedded />
+                    </section>
+                    <section id="mgr-workshop" className="mb-10 scroll-mt-24">
+                        <SectionBar icon="🔧" title="Workshop & Repair" hint="Repair stages & photo evidence" badge={fleetStats.in_repair} isDark={isDark} />
+                        <TechnicianModule embedded />
+                    </section>
                     </>
                 )}
             </main>
