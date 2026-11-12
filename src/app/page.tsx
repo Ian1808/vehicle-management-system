@@ -242,20 +242,20 @@ export default function MainDashboard() {
             )}
             {/* Global top bar — shared across all roles */}
             <header className={`border-b backdrop-blur-md sticky z-40 ${impersonation.active ? 'top-7' : 'top-0'} ${isDark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'}`}>
-                <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
+                <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2 sm:py-3 flex flex-col min-[520px]:flex-row min-[520px]:items-center justify-between gap-2 sm:gap-3">
+                    <div className="flex items-center gap-3 min-w-0 min-[520px]:flex-1">
                         <div className={`w-9 h-9 rounded-2xl border flex items-center justify-center text-base font-black shrink-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>🚗</div>
                         <div className="min-w-0">
                             <h1 className={`text-base font-extrabold tracking-tight truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>Vehicle Management System</h1>
                             <p className={`text-[11px] truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{TAB_META[tab]?.icon} {TAB_META[tab]?.label}</p>
                         </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                        <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className={`h-9 w-9 flex items-center justify-center rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'border-slate-700 bg-slate-800 text-amber-300' : 'border-slate-200 bg-slate-100 text-amber-600'}`}>
+                    <div className="flex flex-wrap min-[520px]:flex-nowrap shrink-0 items-center gap-2">
+                        <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className={`h-9 w-9 shrink-0 flex items-center justify-center rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'border-slate-700 bg-slate-800 text-amber-300' : 'border-slate-200 bg-slate-100 text-amber-600'}`}>
                             {isDark ? '☀️' : '🌙'}
                         </button>
-                        <button onClick={() => setShowSettingsModal(true)} className={`h-9 px-3.5 font-semibold rounded-xl text-xs border cursor-pointer transition-colors ${isDark ? 'border-slate-700 bg-slate-800 text-slate-200' : 'border-slate-200 bg-slate-100 text-slate-700'}`}>⚙️ Settings</button>
-                        <button onClick={() => setConfirmSignOut(true)} className={`h-9 px-3.5 font-bold rounded-xl text-xs border cursor-pointer transition-colors ${isDark ? 'border-rose-900 bg-rose-950 text-rose-300 hover:bg-rose-900/50' : 'border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100'}`}>Sign Out</button>
+                        <button onClick={() => setShowSettingsModal(true)} className={`h-9 px-2.5 sm:px-3.5 whitespace-nowrap font-semibold rounded-xl text-xs border cursor-pointer transition-colors ${isDark ? 'border-slate-700 bg-slate-800 text-slate-200' : 'border-slate-200 bg-slate-100 text-slate-700'}`}>⚙️ Settings</button>
+                        <button onClick={() => setConfirmSignOut(true)} className={`h-9 px-2.5 sm:px-3.5 whitespace-nowrap font-bold rounded-xl text-xs border cursor-pointer transition-colors ${isDark ? 'border-rose-900 bg-rose-950 text-rose-300 hover:bg-rose-900/50' : 'border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100'}`}>Sign Out</button>
                     </div>
                 </div>
                 {tabs.length > 1 && (

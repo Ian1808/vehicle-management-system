@@ -1136,10 +1136,10 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
               title="Active Vehicle Registry"
               right={
                 <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={() => setShowModal(true)} className="h-9 px-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs shadow-lg cursor-pointer transition-colors">
+                  <button onClick={() => setShowModal(true)} className="h-8 px-3 sm:h-9 sm:px-4 whitespace-nowrap bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-[11px] sm:text-xs shadow-lg cursor-pointer transition-colors">
                     + Add Vehicle
                   </button>
-                  <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full border ${isDark ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-slate-200 bg-white text-slate-600'}`}>
+                  <span className={`whitespace-nowrap text-[11px] sm:text-xs font-bold px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full border ${isDark ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-slate-200 bg-white text-slate-600'}`}>
                     Total: {vehicles.length} Vehicles
                   </span>
                 </div>
