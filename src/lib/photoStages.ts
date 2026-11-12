@@ -22,3 +22,18 @@ export const PHOTO_STAGE_RULES: Record<string, PhotoStageRules> = {
 export function getPhotoStageRules(status: string): PhotoStageRules {
     return PHOTO_STAGE_RULES[status] || { before: 'readonly', after: 'readonly', additional: 'readonly' }
 }
+
+export type PhotoGroupKey = 'before' | 'after' | 'additional'
+
+// Which evidence tab should open first for a given vehicle status, so a technician
+// lands directly on the stage that actually needs input instead of hunting for it.
+export function getStageTab(status: string): PhotoGroupKey {
+    switch (status) {
+        case 'pending_before_photos': return 'before'
+        case 'in_repair': return 'additional'   // 'after' is hidden until repair is finished
+        case 'pending_after_photos': return 'after'
+        case 'completed': return 'after'
+        case 'road_ready': return 'after'
+        default: return 'before'
+    }
+}

@@ -6,7 +6,7 @@ import { addWatermarkToFile } from '@/utils/watermark'
 import { useTheme } from '@/lib/theme'
 import { PHOTO_CATEGORIES } from '@/lib/photoCategories'
 import { uniqueFileSuffix } from '@/lib/uploadUtils'
-import { getPhotoStageRules } from '@/lib/photoStages'
+import { getPhotoStageRules, getStageTab } from '@/lib/photoStages'
 import { completeAssignment, type VehicleAssignment } from '@/services/assignmentService'
 import Toast from '@/components/ui/Toast'
 import ConfirmModal from '@/components/ui/ConfirmModal'
@@ -201,8 +201,14 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
             }
         }
         loadMedia()
-        setPhotoGroup('before')
+        setPhotoGroup(selectedVehicle ? getStageTab(selectedVehicle.status) : 'before')
     }, [selectedVehicle?.id])
+
+    // When the vehicle advances stages in place (Start Repair / Finish Repair / Mark Complete),
+    // follow it to the tab the new status needs.
+    useEffect(() => {
+        if (selectedVehicle) setPhotoGroup(getStageTab(selectedVehicle.status))
+    }, [selectedVehicle?.status])
 
     function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>, categoryKey: string, mediaType: 'photo_before' | 'photo_after') {
         const file = e.target.files?.[0]
@@ -366,6 +372,8 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
         { key: 'additional' as const, label: 'Additional', count: additionalPhotos.length, total: 0, shown: additionalMode !== 'hidden' },
     ].filter(g => g.shown)
     const activePhotoGroup = photoGroups.some(g => g.key === photoGroup) ? photoGroup : (photoGroups[0]?.key ?? null)
+    const activeGroupMeta = photoGroups.find(g => g.key === activePhotoGroup)
+    const activeGroupMode = activePhotoGroup === 'before' ? beforeMode : activePhotoGroup === 'after' ? afterMode : additionalMode
 
     function handleStartRepair() {
         if (!selectedVehicle) return
@@ -540,6 +548,36 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
         })
     }
 
+    function requestRemoveThirdPartyPhoto(assignment: VehicleAssignment, photo: { id: string; file_url: string }) {
+        setConfirmModal({
+            title: 'Remove Work Photo',
+            message: `Remove this work photo for ${assignment.vehicles?.plate_number || 'this vehicle'}? This cannot be undone. You can upload a replacement while the assignment is still pending.`,
+            confirmText: 'Remove Photo',
+            confirmVariant: 'danger',
+            onConfirm: () => executeRemoveThirdPartyPhoto(assignment, photo),
+        })
+    }
+
+    async function executeRemoveThirdPartyPhoto(assignment: VehicleAssignment, photo: { id: string; file_url: string }) {
+        setConfirmModal(null)
+        try {
+            const url = new URL(photo.file_url)
+            const marker = '/storage/v1/object/public/vehicle-files/'
+            const idx = url.pathname.indexOf(marker)
+            const storagePath = idx !== -1 ? decodeURIComponent(url.pathname.slice(idx + marker.length)) : null
+            if (storagePath) {
+                await supabase.storage.from('vehicle-files').remove([storagePath])
+            }
+            const { error: deleteErr } = await supabase.from('vehicle_media').delete().eq('id', photo.id)
+            if (deleteErr) throw deleteErr
+
+            showToast('Work photo removed.', 'success')
+            await reloadMyAssignments()
+        } catch (err) {
+            showToast(err instanceof Error ? err.message : 'Failed to remove work photo', 'error')
+        }
+    }
+
     const bgClass = isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'
     const innerCard = isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'
 
@@ -628,14 +666,42 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                                                     {done && a.completed_at ? `Completed ${new Date(a.completed_at).toLocaleString()}` : `Assigned ${new Date(a.created_at).toLocaleString()}`}
                                                 </p>
                                                 {(assignmentPhotos[a.id] || []).length > 0 ? (
-                                                    <div className="flex flex-wrap gap-2 mb-3">
-                                                        {(assignmentPhotos[a.id] || []).map(ph => (
-                                                            // eslint-disable-next-line @next/next/no-img-element
-                                                            <img key={ph.id} src={ph.file_url} alt="Work evidence" className="w-14 h-14 rounded-lg object-cover border border-slate-700" />
-                                                        ))}
-                                                        <span className={`self-center text-[10px] font-bold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                                            {assignmentPhotos[a.id].length} photo{assignmentPhotos[a.id].length > 1 ? 's' : ''} attached
-                                                        </span>
+                                                    <div className="mb-3">
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {(assignmentPhotos[a.id] || []).map((ph, idx) => (
+                                                                <div key={ph.id} className="relative">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setPreviewMedia({
+                                                                            items: (assignmentPhotos[a.id] || []).map((p, i) => ({
+                                                                                url: p.file_url,
+                                                                                title: `${plate} — ${specialty || 'work'} evidence ${i + 1}`,
+                                                                            })),
+                                                                            index: idx,
+                                                                        })}
+                                                                        title="View full photo"
+                                                                        className={`block w-16 h-16 rounded-lg overflow-hidden border cursor-zoom-in hover:opacity-85 transition-opacity ${isDark ? 'border-slate-700' : 'border-slate-300'}`}
+                                                                    >
+                                                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                                        <img src={ph.file_url} alt="Work evidence" className="w-full h-full object-cover" />
+                                                                    </button>
+                                                                    {!done && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => requestRemoveThirdPartyPhoto(a, ph)}
+                                                                            aria-label="Remove work photo"
+                                                                            title="Remove this photo"
+                                                                            className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-black leading-none flex items-center justify-center shadow-md cursor-pointer"
+                                                                        >
+                                                                            ✕
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                        <p className={`mt-1.5 text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                            {assignmentPhotos[a.id].length} photo{assignmentPhotos[a.id].length > 1 ? 's' : ''} attached · tap to view
+                                                        </p>
                                                     </div>
                                                 ) : (
                                                     <p className={`mb-3 rounded-lg border px-2.5 py-1.5 text-[10px] font-bold uppercase ${isDark ? 'border-amber-800 bg-amber-950/40 text-amber-300' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
@@ -651,7 +717,7 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                                                         : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
                                                         }`}
                                                 >
-                                                    {uploadingKey === `3p_${a.id}` ? 'Uploading…' : '📁 Upload Photo'}
+                                                    {uploadingKey === `3p_${a.id}` ? 'Uploading…' : done ? '➕ Add Photo' : '📁 Upload Photo'}
                                                 </label>
                                                 <label
                                                     htmlFor={`3p-camera-${a.id}`}
@@ -675,6 +741,15 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                                                     >
                                                         ✓ Mark Part Complete
                                                     </button>
+                                                )}
+                                                {done ? (
+                                                    <p className={`w-full text-[10px] font-bold uppercase tracking-wider mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                                                        Completed — photos are locked. You can still add more evidence.
+                                                    </p>
+                                                ) : (
+                                                    <p className={`w-full text-[10px] font-bold uppercase tracking-wider mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                                                        Pending — upload or remove photos freely, then mark part complete.
+                                                    </p>
                                                 )}
                                             </div>
                                         </Card>
@@ -744,6 +819,16 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                                 <div className="pt-8 space-y-6">
                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                         <h3 className={`text-sm font-extrabold tracking-wider uppercase ${isDark ? 'text-white' : 'text-slate-900'}`}>Workshop Inspection Evidence</h3>
+                                        {activeGroupMeta && (
+                                            <span
+                                                data-testid="active-stage-badge"
+                                                className={`text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full border ${activeGroupMode === 'edit'
+                                                    ? isDark ? 'bg-emerald-950 text-emerald-300 border-emerald-800' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                    : isDark ? 'bg-slate-800 text-slate-400 border-slate-700' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
+                                            >
+                                                {activeGroupMeta.label} stage · {activeGroupMode === 'edit' ? 'Open for input' : 'Read-only'}
+                                            </span>
+                                        )}
                                     </div>
 
                                     <div className="flex flex-wrap gap-2">
