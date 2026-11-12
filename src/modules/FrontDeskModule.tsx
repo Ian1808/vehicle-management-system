@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { addWatermarkToFile } from '@/utils/watermark'
 import { fetchActiveVehicles, fetchVehicleMedia, insertVehicle, updateVehicleStatus, deleteDocumentRecord } from '@/services/vehicleService'
@@ -99,6 +99,15 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
   const [pendingCostSave, setPendingCostSave] = useState<{ field: CostField; label: string; amount: number } | null>(null)
   const [costSaving, setCostSaving] = useState(false)
   const [photoGroup, setPhotoGroup] = useState<'before' | 'after' | 'additional'>('before')
+  const [editMode, setEditMode] = useState(false)
+  // Manager edit session staging — nothing persists until Save is confirmed.
+  const [stagedCosts, setStagedCosts] = useState<Partial<Record<CostField, number>>>({})
+  const [pendingDocOps, setPendingDocOps] = useState<{ type: 'upload' | 'remove'; category: string; file?: File }[]>([])
+  const [pendingPhotoRemovals, setPendingPhotoRemovals] = useState<MediaItem[]>([])
+  const [stagedStatusChange, setStagedStatusChange] = useState<string | null>(null)
+  const [showSaveDiscard, setShowSaveDiscard] = useState(false)
+  const commitAssignmentsRef = useRef<(() => Promise<void>) | null>(null)
+  const resetAssignmentsRef = useRef<(() => Promise<void>) | null>(null)
   const { isDark } = useTheme()
 
   // User State
@@ -185,6 +194,7 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
       if (selectedVehicle) {
         setDetailTab('overview')
         setPhotoGroup('before')
+        setEditMode(false)
         try {
           const media = await fetchVehicleMedia(selectedVehicle.id)
           setMediaItems(media)
@@ -294,9 +304,14 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
       message: `Watermark and upload "${file.name}" for ${documentLabel(category)}?`,
       confirmText: 'Upload Document',
       confirmVariant: 'primary',
-      onConfirm: () => executeFileUpload(file, category),
+      onConfirm: () => editing ? stageDocUpload(category, file) : executeFileUpload(file, category),
     })
     e.target.value = ''
+  }
+
+  function stageDocUpload(category: string, file: File) {
+    setPendingDocOps(ops => [...ops.filter(o => !(o.type === 'upload' && o.category === category)), { type: 'upload', category, file }])
+    showToast(`${documentLabel(category)} queued — confirm Save to upload.`, 'success')
   }
 
   async function executeFileUpload(file: File, category: string) {
@@ -350,8 +365,13 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
       message: `Are you sure you want to remove the ${documentLabel(category)}?`,
       confirmText: 'Remove Document',
       confirmVariant: 'danger',
-      onConfirm: () => executeDeleteDocument(category),
+      onConfirm: () => editing ? stageDocRemove(category) : executeDeleteDocument(category),
     })
+  }
+
+  function stageDocRemove(category: string) {
+    setPendingDocOps(ops => [...ops.filter(o => !(o.type === 'remove' && o.category === category)), { type: 'remove', category }])
+    showToast(`${documentLabel(category)} removal staged — confirm Save to apply.`, 'success')
   }
 
   async function executeDeleteDocument(category: string) {
@@ -409,17 +429,23 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
   // Step 1: open the value-entry modal popup.
   function openCostEdit(field: CostField, label: string) {
     if (!selectedVehicle) return
-    const current = currentCostValue(field)
+    const current = editing && stagedCosts[field] !== undefined ? stagedCosts[field]! : currentCostValue(field)
     // Prefill even when the current value is 0 — an empty input would fail validation (NaN) and block the confirm flow.
     setCostEdit({ field, label, value: String(current) })
   }
 
-  // Step 2: validate, close the popup, and open the confirm modal.
+  // Step 2: validate, close the popup. In a manager edit session the change is staged; otherwise confirm & save immediately.
   function continueCostEdit() {
     if (!costEdit) return
     const amount = parseFloat(costEdit.value)
     if (Number.isNaN(amount) || amount < 0) {
       showToast('Enter a valid amount.', 'error')
+      return
+    }
+    if (editing) {
+      setCostEdit(null)
+      setStagedCosts(prev => ({ ...prev, [costEdit.field]: amount }))
+      showToast(`${costEdit.label} change staged — confirm Save when done.`, 'success')
       return
     }
     const oldValue = currentCostValue(costEdit.field)
@@ -481,6 +507,44 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
     }
   }
 
+  function requestRemovePhoto(item: MediaItem) {
+    if (editing) {
+      const alreadyStaged = pendingPhotoRemovals.some(p => p.id === item.id)
+      if (alreadyStaged) {
+        setPendingPhotoRemovals(list => list.filter(p => p.id !== item.id))
+        showToast('Photo removal undone.', 'success')
+      } else {
+        setPendingPhotoRemovals(list => [...list, item])
+        showToast('Photo removal staged — confirm Save to apply.', 'success')
+      }
+      return
+    }
+    setConfirmModal({
+      title: 'Confirm Photo Removal',
+      message: `Remove this photo from vehicle ${selectedVehicle?.plate_number}? This cannot be undone.`,
+      confirmText: 'Remove Photo',
+      confirmVariant: 'danger',
+      onConfirm: () => executeRemovePhoto(item),
+    })
+  }
+
+  async function executeRemovePhoto(item: MediaItem) {
+    setConfirmModal(null)
+    if (!selectedVehicle) return
+    try {
+      const pathParts = item.file_url.split('/vehicle-files/')
+      if (pathParts.length > 1) {
+        await supabase.storage.from('vehicle-files').remove([decodeURIComponent(pathParts[1])])
+      }
+      await supabase.from('vehicle_media').delete().eq('id', item.id)
+      showToast('Photo removed successfully.', 'success')
+      const updatedMedia = await fetchVehicleMedia(selectedVehicle.id)
+      setMediaItems(updatedMedia)
+    } catch (err: any) {
+      showToast(err.message || 'Failed to remove photo', 'error')
+    }
+  }
+
   function openPhaseGallery(phase: 'photo_before' | 'photo_after', clickedUrl: string) {
     const items = mediaItems
       .filter(m => m.media_type === phase)
@@ -500,6 +564,79 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
   }
 
   const innerCard = isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'
+
+  // Manager & admin detail view: read-only by default; "Edit Details" unlocks a staged edit session.
+  const restrictedRole = userRole === 'manager' || userRole === 'admin'
+  const editing = restrictedRole && editMode
+  const canEditCore = !restrictedRole || editMode
+  const canEditPhotos = restrictedRole && editMode
+
+  function clearStaged() {
+    setStagedCosts({})
+    setPendingDocOps([])
+    setPendingPhotoRemovals([])
+    setStagedStatusChange(null)
+  }
+
+  function hasStagedChanges() {
+    return Object.keys(stagedCosts).length > 0 || pendingDocOps.length > 0 || pendingPhotoRemovals.length > 0 || stagedStatusChange !== null
+  }
+
+  function requestEnterEditMode() {
+    setConfirmModal({
+      title: 'Enter Edit Mode?',
+      message: 'You can edit price, documents, photos, and third-party technicians. Changes are staged and only saved when you confirm Save.',
+      confirmText: 'Start Editing',
+      confirmVariant: 'success',
+      onConfirm: () => { setConfirmModal(null); setEditMode(true) },
+    })
+  }
+
+  async function handleSaveChanges() {
+    setShowSaveDiscard(false)
+    try {
+      // Costs
+      const costEntries = Object.entries(stagedCosts)
+      if (costEntries.length > 0) {
+        const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
+        for (const [field, amount] of costEntries) patch[field] = amount
+        const { error } = await supabase.from('vehicles').update(patch).eq('id', selectedVehicle!.id)
+        if (error) throw error
+        setSelectedVehicle(v => (v ? { ...v, ...stagedCosts } : v))
+      }
+      // Documents (in order: uploads then removals)
+      for (const op of pendingDocOps) {
+        if (op.type === 'upload' && op.file) await executeFileUpload(op.file, op.category)
+      }
+      for (const op of pendingDocOps) {
+        if (op.type === 'remove') await executeDeleteDocument(op.category)
+      }
+      // Photos
+      for (const item of pendingPhotoRemovals) await executeRemovePhoto(item)
+      // Status change
+      if (stagedStatusChange && selectedVehicle) {
+        await updateVehicleStatus(selectedVehicle.id, stagedStatusChange)
+        setSelectedVehicle(v => (v ? { ...v, status: stagedStatusChange } : v))
+      }
+      // Third-party assignments
+      await commitAssignmentsRef.current?.()
+      const list = await fetchActiveVehicles(userRole === 'admin' ? null : userCompanyId)
+      setVehicles(list)
+      clearStaged()
+      setEditMode(false)
+      showToast('Changes saved.', 'success')
+    } catch (err: any) {
+      showToast(err.message || 'Failed to save changes', 'error')
+    }
+  }
+
+  async function handleDiscardChanges() {
+    setShowSaveDiscard(false)
+    clearStaged()
+    setEditMode(false)
+    await resetAssignmentsRef.current?.()
+    showToast('Changes discarded.', 'success')
+  }
 
   const docCount = mediaItems.filter(m => m.media_type === 'document').length
   const beforePhotos = mediaItems.filter(m => m.media_type === 'photo_before')
@@ -561,6 +698,30 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
           </div>
         </div>
       )}
+      {showSaveDiscard && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`border rounded-3xl shadow-2xl max-w-sm w-full p-6 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
+            <h3 className="text-lg font-extrabold mb-1">💾 Save Changes?</h3>
+            <p className={`text-xs mb-5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Apply your staged changes to this vehicle, or discard them? Unsaved changes will be lost.</p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleDiscardChanges}
+                className={`px-5 py-2.5 rounded-xl text-xs font-bold cursor-pointer border ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
+              >
+                Discard Changes
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveChanges}
+                className="px-6 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer shadow-lg shadow-emerald-500/20"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} onNavigate={(index) => setPreviewMedia(prev => (prev ? { ...prev, index } : prev))} isDark={isDark} />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24 lg:pb-8">
@@ -568,6 +729,7 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
           <div>
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <button onClick={() => {
+                if (editMode && hasStagedChanges()) { setShowSaveDiscard(true); return }
                 if (detailOnly) { onExit?.(); return }
                 setSelectedVehicle(null)
                 const url = new URL(window.location.href)
@@ -576,6 +738,16 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
               }} className={`text-xs font-bold px-3.5 py-2 rounded-xl border cursor-pointer ${isDark ? 'border-slate-800 bg-slate-950 text-blue-400' : 'border-slate-200 bg-white text-blue-600'}`}>
                 {detailOnly ? '← Back to Fleet' : '← Back to Registry'}
               </button>
+              {restrictedRole && (
+                <button
+                  onClick={() => editMode ? (hasStagedChanges() ? setShowSaveDiscard(true) : handleSaveChanges()) : requestEnterEditMode()}
+                  className={editMode
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-lg transition-all cursor-pointer'
+                    : 'bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-lg transition-all cursor-pointer'}
+                >
+                  {editMode ? '💾 Save Changes' : '✏️ Edit Details'}
+                </button>
+              )}
             </div>
 
             <Card isDark={isDark} className="p-5 sm:p-8 mb-8 shadow-2xl">
@@ -584,7 +756,10 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
                 <div>
                   <div className="flex flex-wrap items-center gap-3">
                     <h2 className={`text-2xl sm:text-3xl font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedVehicle.plate_number}</h2>
-                    <StatusBadge status={selectedVehicle.status} />
+                    <StatusBadge status={editing && stagedStatusChange ? stagedStatusChange : selectedVehicle.status} />
+                    {editing && stagedStatusChange && stagedStatusChange !== selectedVehicle.status && (
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider text-purple-400 border border-purple-500/40">● Staged</span>
+                    )}
                   </div>
                   <p className={`mt-1.5 font-semibold text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{selectedVehicle.make_model_year}</p>
                   <p className={`text-sm font-mono mt-3 inline-block max-w-full px-3.5 py-1.5 rounded-xl border break-all ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
@@ -596,6 +771,43 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
                   <p className={`text-base font-black mt-1.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedVehicle.insurance_panel || 'None Assigned'}</p>
                 </div>
               </div>
+
+              {/* Vehicle status override — manager/admin only, staged until Save */}
+              {restrictedRole && (
+                <div className={`mt-5 rounded-2xl border p-4 ${isDark ? 'bg-slate-900/70 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-[10px] uppercase font-extrabold tracking-wider text-slate-400">🔄 Vehicle Status Override</p>
+                    {editing && stagedStatusChange && stagedStatusChange !== selectedVehicle.status && (
+                      <span className="text-[9px] font-extrabold uppercase tracking-wider text-purple-400">● Staged</span>
+                    )}
+                  </div>
+                  <select
+                    aria-label="Vehicle Status Override"
+                    value={editing && stagedStatusChange ? stagedStatusChange : selectedVehicle.status}
+                    disabled={!editing}
+                    onChange={(e) => {
+                      const next = e.target.value
+                      if (next === selectedVehicle.status) {
+                        setStagedStatusChange(null)
+                        showToast('Status change cleared.', 'success')
+                      } else {
+                        setStagedStatusChange(next)
+                        showToast('Status change staged — confirm Save to apply.', 'success')
+                      }
+                    }}
+                    className={`w-full px-3.5 py-3 rounded-xl text-xs font-extrabold border transition-colors ${editing ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'} ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'}`}
+                  >
+                    {STATUS_STEPS.map(step => (
+                      <option key={step.key} value={step.key}>{step.label}</option>
+                    ))}
+                  </select>
+                  <p className={`mt-2 text-[10px] font-semibold ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                    {editing
+                      ? 'Move this vehicle to another stage at any point. The new status is applied when you press Save Changes.'
+                      : 'Read-only — press ✏️ Edit Details to change this vehicle’s status.'}
+                  </p>
+                </div>
+              )}
 
               {/* Detail tabs — 2×2 grid on phones so all options are always visible, single row on desktop */}
               <div className="grid grid-cols-2 gap-1.5 sm:flex sm:gap-2 pt-5 pb-1 -mb-px">
@@ -650,10 +862,20 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
                         {(selectedVehicle.status === 'completed' || selectedVehicle.status === 'road_ready') && 'Repair complete — all photo evidence and documents are archived.'}
                         {!['intake', 'pending_before_photos', 'in_repair', 'pending_after_photos', 'completed', 'road_ready'].includes(selectedVehicle.status) && 'Managing this vehicle.'}
                       </p>
-                      {selectedVehicle.status === 'intake' && (
-                        <button onClick={handleSendToWorkshop} className="shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all cursor-pointer">
+                      {selectedVehicle.status === 'intake' && canEditCore && (
+                        <button onClick={() => {
+                          if (editing) {
+                            setStagedStatusChange('pending_before_photos')
+                            showToast('Status change staged — confirm Save to apply.', 'success')
+                          } else {
+                            handleSendToWorkshop()
+                          }
+                        }} className="shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all cursor-pointer">
                           ➡️ Proceed to Pending Before Photos
                         </button>
+                      )}
+                      {editing && stagedStatusChange && (
+                        <p className="text-[9px] font-bold uppercase tracking-wider text-purple-400">● Status change staged</p>
                       )}
                     </div>
                   </div>
@@ -662,30 +884,43 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
                   <div className={`grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-5 mt-6`}>
                     <div className={`p-4 sm:p-5 rounded-2xl border ${innerCard}`}>
                       <p className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wide"><span className="hidden sm:inline">Intake Cost</span><span className="sm:hidden">Intake Cost</span></p>
-                      <p className={`text-xl sm:text-2xl font-black mt-1.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.intake_cost?.toLocaleString()}</p>
-                      <button
-                        type="button"
-                        onClick={() => openCostEdit('intake_cost', 'Intake Cost')}
-                        className="mt-3 w-full bg-blue-600 hover:bg-blue-500 text-white px-2 py-2 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer"
-                      >
-                        ✏️ Edit
-                      </button>
+                      <p className={`text-xl sm:text-2xl font-black mt-1.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {(stagedCosts.intake_cost ?? selectedVehicle.intake_cost)?.toLocaleString()}</p>
+                      {editing && stagedCosts.intake_cost !== undefined && (
+                        <p className="mt-1 text-[9px] font-bold uppercase tracking-wider text-purple-400">● Staged</p>
+                      )}
+                      {canEditCore && (
+                        <button
+                          type="button"
+                          onClick={() => openCostEdit('intake_cost', 'Intake Cost')}
+                          className="mt-3 w-full bg-blue-600 hover:bg-blue-500 text-white px-2 py-2 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer"
+                        >
+                          ✏️ Edit
+                        </button>
+                      )}
                     </div>
                     <div className={`p-4 sm:p-5 rounded-2xl border ${innerCard}`}>
                       <p className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wide"><span className="hidden sm:inline">Market Value</span><span className="sm:hidden">Market Value</span></p>
-                      <p className={`text-xl sm:text-2xl font-black mt-1.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.market_value?.toLocaleString()}</p>
-                      <button
-                        type="button"
-                        onClick={() => openCostEdit('market_value', 'Market Value')}
-                        className="mt-3 w-full bg-blue-600 hover:bg-blue-500 text-white px-2 py-2 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer"
-                      >
-                        ✏️ Edit
-                      </button>
+                      <p className={`text-xl sm:text-2xl font-black mt-1.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {(stagedCosts.market_value ?? selectedVehicle.market_value)?.toLocaleString()}</p>
+                      {editing && stagedCosts.market_value !== undefined && (
+                        <p className="mt-1 text-[9px] font-bold uppercase tracking-wider text-purple-400">● Staged</p>
+                      )}
+                      {canEditCore && (
+                        <button
+                          type="button"
+                          onClick={() => openCostEdit('market_value', 'Market Value')}
+                          className="mt-3 w-full bg-blue-600 hover:bg-blue-500 text-white px-2 py-2 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer"
+                        >
+                          ✏️ Edit
+                        </button>
+                      )}
                     </div>
                     <div className={`p-4 sm:p-5 rounded-2xl border ${innerCard}`}>
                       <p className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wide"><span className="hidden sm:inline">Total Repair Cost</span><span className="sm:hidden">Repair Cost</span></p>
-                      <p className={`text-xl sm:text-2xl font-black mt-1.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {selectedVehicle.repair_cost?.toLocaleString()}</p>
-                      {(selectedVehicle.status === 'completed' || selectedVehicle.status === 'road_ready') && (
+                      <p className={`text-xl sm:text-2xl font-black mt-1.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>RM {(stagedCosts.repair_cost ?? selectedVehicle.repair_cost)?.toLocaleString()}</p>
+                      {editing && stagedCosts.repair_cost !== undefined && (
+                        <p className="mt-1 text-[9px] font-bold uppercase tracking-wider text-purple-400">● Staged</p>
+                      )}
+                      {canEditCore && (selectedVehicle.status === 'completed' || selectedVehicle.status === 'road_ready') && (
                         <button
                           type="button"
                           onClick={() => openCostEdit('repair_cost', 'Repair Cost')}
@@ -711,19 +946,29 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
                           <div>
                             <p className={`text-xs font-extrabold uppercase mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{documentLabel(cat)}</p>
                             <p className={`text-xs font-semibold mb-5 ${doc ? 'text-emerald-400' : 'text-slate-500'}`}>{doc ? '✓ Verified & Stored' : 'Pending Upload'}</p>
+                            {editing && pendingDocOps.some(o => o.type === 'remove' && o.category === cat) && (
+                              <p className="-mt-4 mb-3 text-[9px] font-bold uppercase tracking-wider text-rose-400">● Will be removed on save</p>
+                            )}
+                            {editing && pendingDocOps.some(o => o.type === 'upload' && o.category === cat) && (
+                              <p className="-mt-4 mb-3 text-[9px] font-bold uppercase tracking-wider text-purple-400">● Queued — upload on save</p>
+                            )}
                           </div>
                           {doc ? (
                             <div className="flex gap-2">
-                              <button onClick={() => setPreviewMedia({ items: [{ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${documentLabel(cat)}` }], index: 0 })} className={`w-1/2 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-blue-950 text-blue-300 hover:bg-blue-900 border-blue-800' : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200'}`}>View</button>
-                              <button onClick={() => requestDeleteDocument(cat)} className={`w-1/2 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 text-rose-300 hover:bg-rose-900 border-rose-900' : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-200'}`}>Remove</button>
+                              <button onClick={() => setPreviewMedia({ items: [{ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${documentLabel(cat)}` }], index: 0 })} className={`${canEditCore ? 'w-1/2' : 'w-full'} py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-blue-950 text-blue-300 hover:bg-blue-900 border-blue-800' : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200'}`}>View</button>
+                              {canEditCore && (
+                                <button onClick={() => requestDeleteDocument(cat)} className={`w-1/2 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 text-rose-300 hover:bg-rose-900 border-rose-900' : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-200'}`}>Remove</button>
+                              )}
                             </div>
                           ) : (
-                            <div>
-                              <label htmlFor={`file-${cat}`} className="w-full block text-center bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow-md">
-                                {uploadingCategory === cat ? 'Uploading…' : 'Upload File'}
-                              </label>
-                              <input id={`file-${cat}`} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => handleFileSelect(e, cat)} />
-                            </div>
+                            canEditCore && (
+                              <div>
+                                <label htmlFor={`file-${cat}`} className="w-full block text-center bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow-md">
+                                  {uploadingCategory === cat ? 'Uploading…' : 'Upload File'}
+                                </label>
+                                <input id={`file-${cat}`} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => handleFileSelect(e, cat)} />
+                              </div>
+                            )
                           )}
                         </div>
                       )
@@ -735,7 +980,7 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
               {/* --- Photos tab --- */}
               {detailTab === 'photos' && (
                 <div className="pt-6">
-                  <h3 className={`text-sm font-extrabold tracking-wider uppercase mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>Technician Photo Evidence (Read-Only)</h3>
+                  <h3 className={`text-sm font-extrabold tracking-wider uppercase mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>{restrictedRole && !editMode ? 'Technician Photo Evidence (Read-Only)' : 'Technician Photo Evidence'}</h3>
 
                   {/* Before / After / Additional separated tabs */}
                   <div className="flex gap-2 flex-wrap">
@@ -762,6 +1007,9 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
                               <div key={item.id} className={`border rounded-2xl p-4 flex flex-col justify-between ${innerCard}`}>
                                 <p className={`text-xs font-extrabold uppercase mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>{cat?.label ?? item.category}</p>
                                 <PhotoThumb url={item.file_url} alt={`${selectedVehicle.plate_number} - ${cat?.label ?? item.category} (Before)`} onClick={() => openPhaseGallery('photo_before', item.file_url)} className="h-32 sm:h-40" />
+                                {canEditPhotos && (
+                                  <button onClick={() => requestRemovePhoto(item)} className={`mt-2 w-full py-1.5 rounded-lg text-[10px] font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}>{pendingPhotoRemovals.some(p => p.id === item.id) ? '✓ Staged to Remove' : '🗑️ Remove'}</button>
+                                )}
                               </div>
                             )
                           })}
@@ -782,6 +1030,9 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
                               <div key={item.id} className={`border rounded-2xl p-4 flex flex-col justify-between ${innerCard}`}>
                                 <p className={`text-xs font-extrabold uppercase mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>{cat?.label ?? item.category}</p>
                                 <PhotoThumb url={item.file_url} alt={`${selectedVehicle.plate_number} - ${cat?.label ?? item.category} (After)`} onClick={() => openPhaseGallery('photo_after', item.file_url)} className="h-32 sm:h-40" />
+                                {canEditPhotos && (
+                                  <button onClick={() => requestRemovePhoto(item)} className={`mt-2 w-full py-1.5 rounded-lg text-[10px] font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}>{pendingPhotoRemovals.some(p => p.id === item.id) ? '✓ Staged to Remove' : '🗑️ Remove'}</button>
+                                )}
                               </div>
                             )
                           })}
@@ -803,6 +1054,9 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
                                 <p className="text-[11px] font-semibold text-purple-400 mb-3">✓ Captured</p>
                               </div>
                               <PhotoThumb url={item.file_url} alt={`${selectedVehicle.plate_number} - ${additionalLabel(item.category)} (Additional)`} onClick={() => openAdditionalGallery(item.file_url)} className="h-40" />
+                              {canEditPhotos && (
+                                <button onClick={() => requestRemovePhoto(item)} className={`mt-2 w-full py-1.5 rounded-lg text-[10px] font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}>🗑️ Remove</button>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -812,19 +1066,21 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
                 </div>
               )}
 
-              {/* --- Workshop tab --- */}
-              {detailTab === 'workshop' && (
-                <div className="pt-6">
-                  <ThirdPartyAssignmentPanel
-                    isDark={isDark}
-                    vehicleId={selectedVehicle.id}
-                    vehiclePlate={selectedVehicle.plate_number}
-                    companyId={userCompanyId}
-                    isAdmin={userRole === 'admin'}
-                    showToast={showToast}
-                  />
-                </div>
-              )}
+              {/* --- Workshop tab (kept mounted so staged assignment ops survive tab switches) --- */}
+              <div className={`pt-6 ${detailTab === 'workshop' ? '' : 'hidden'}`}>
+                <ThirdPartyAssignmentPanel
+                  isDark={isDark}
+                  vehicleId={selectedVehicle.id}
+                  vehiclePlate={selectedVehicle.plate_number}
+                  companyId={userCompanyId}
+                  isAdmin={userRole === 'admin'}
+                  readOnly={restrictedRole && !editMode}
+                  staged={editing}
+                  onCommitReady={(fn) => { commitAssignmentsRef.current = fn }}
+                  onResetReady={(fn) => { resetAssignmentsRef.current = fn }}
+                  showToast={showToast}
+                />
+              </div>
             </Card>
           </div>
         ) : detailOnly ? null : (

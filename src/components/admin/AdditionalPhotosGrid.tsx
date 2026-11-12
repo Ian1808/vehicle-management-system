@@ -16,13 +16,15 @@ type AdditionalPhotosGridProps = {
     vehiclePlate: string
     accent?: 'purple' | 'blue'
     onView: (url: string, title: string) => void
+    onRemove?: (item: MediaItem) => void
+    pendingRemovalIds?: string[]
 }
 
 function additionalLabel(category: string): string {
     return category.replace(/^extra_/, '').replace(/_[a-f0-9]{8}$/i, '').replace(/_/g, ' ')
 }
 
-export default function AdditionalPhotosGrid({ isDark, mediaItems, vehiclePlate, accent = 'purple', onView }: AdditionalPhotosGridProps) {
+export default function AdditionalPhotosGrid({ isDark, mediaItems, vehiclePlate, accent = 'purple', onView, onRemove, pendingRemovalIds }: AdditionalPhotosGridProps) {
     const additional = mediaItems.filter(m => m.media_type === 'photo_additional')
     const isBlue = accent === 'blue'
     const capturedColor = isBlue ? (isDark ? 'text-blue-300' : 'text-blue-600') : (isDark ? 'text-purple-300' : 'text-purple-600')
@@ -50,6 +52,15 @@ export default function AdditionalPhotosGrid({ isDark, mediaItems, vehiclePlate,
                                 onClick={() => onView(item.file_url, `${vehiclePlate} - ${additionalLabel(item.category)} (Additional)`)}
                                 className="h-24"
                             />
+                            {onRemove && (
+                                <button
+                                    type="button"
+                                    onClick={() => onRemove(item)}
+                                    className={`w-full py-1.5 rounded-lg text-[10px] font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
+                                >
+                                    {pendingRemovalIds?.includes(item.id) ? '✓ Staged to Remove' : '🗑️ Remove'}
+                                </button>
+                            )}
                         </div>
                     ))}
                 </div>

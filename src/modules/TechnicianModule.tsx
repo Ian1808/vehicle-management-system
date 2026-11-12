@@ -361,21 +361,21 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
 
     function handleStartRepair() {
         if (!selectedVehicle) return
-        if (!allBeforeCaptured) {
-            showToast(`Cannot start repair — ${totalAngles - beforeCapturedAngles} 'Before' photo(s) still missing. All ${totalAngles} angles are required.`, 'error')
-            return
-        }
+        const missing = totalAngles - beforeCapturedAngles
+        const incomplete = missing > 0
         setConfirmModal({
-            title: 'Start Repair',
-            message: `All 8 'Before' photos captured. Move ${selectedVehicle.plate_number} to IN REPAIR?`,
-            confirmText: 'Start Repair',
-            confirmVariant: 'success',
+            title: incomplete ? '⚠️ Photos Not Fully Submitted' : 'Start Repair',
+            message: incomplete
+                ? `Only ${beforeCapturedAngles}/${totalAngles} 'Before' photos captured — ${missing} angle(s) missing. Submit anyway and move ${selectedVehicle.plate_number} to IN REPAIR? The evidence set will stay incomplete.`
+                : `All ${totalAngles} 'Before' photos captured. Move ${selectedVehicle.plate_number} to IN REPAIR?`,
+            confirmText: incomplete ? 'Submit Anyway' : 'Start Repair',
+            confirmVariant: incomplete ? 'danger' : 'success',
             onConfirm: async () => {
                 setConfirmModal(null)
                 try {
                     await supabase.from('vehicles').update({ status: 'in_repair' }).eq('id', selectedVehicle.id)
                     setSelectedVehicle({ ...selectedVehicle, status: 'in_repair' })
-                    showToast('Vehicle moved to In Repair!', 'success')
+                    showToast(incomplete ? `Submitted with ${beforeCapturedAngles}/${totalAngles} Before photos — vehicle moved to In Repair.` : 'Vehicle moved to In Repair!', 'success')
                 } catch (err) {
                     showToast(err instanceof Error ? err.message : 'Failed to update status', 'error')
                 }
@@ -405,21 +405,21 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
 
     function handleCompleteVehicle() {
         if (!selectedVehicle) return
-        if (!allAfterCaptured) {
-            showToast(`Cannot mark completed — ${totalAngles - afterCapturedAngles} 'After' photo(s) still missing. All ${totalAngles} angles are required.`, 'error')
-            return
-        }
+        const missing = totalAngles - afterCapturedAngles
+        const incomplete = missing > 0
         setConfirmModal({
-            title: 'Mark Completed',
-            message: `All 8 'After' photos captured. Mark ${selectedVehicle.plate_number} as COMPLETED?`,
-            confirmText: 'Mark Completed',
-            confirmVariant: 'success',
+            title: incomplete ? '⚠️ Photos Not Fully Submitted' : 'Mark Completed',
+            message: incomplete
+                ? `Only ${afterCapturedAngles}/${totalAngles} 'After' photos captured — ${missing} angle(s) missing. Submit anyway and mark ${selectedVehicle.plate_number} as COMPLETED? The evidence set will stay incomplete.`
+                : `All ${totalAngles} 'After' photos captured. Mark ${selectedVehicle.plate_number} as COMPLETED?`,
+            confirmText: incomplete ? 'Submit Anyway' : 'Mark Completed',
+            confirmVariant: incomplete ? 'danger' : 'success',
             onConfirm: async () => {
                 setConfirmModal(null)
                 try {
                     await supabase.from('vehicles').update({ status: 'completed' }).eq('id', selectedVehicle.id)
                     setSelectedVehicle({ ...selectedVehicle, status: 'completed' })
-                    showToast('Vehicle marked as Completed!', 'success')
+                    showToast(incomplete ? `Submitted with ${afterCapturedAngles}/${totalAngles} After photos — vehicle marked Completed.` : 'Vehicle marked as Completed!', 'success')
                 } catch (err) {
                     showToast(err instanceof Error ? err.message : 'Failed to update status', 'error')
                 }
@@ -659,24 +659,24 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                                 <StatusBadge status={selectedVehicle.status} />
                             </div>
 
-                            {/* Photo completeness banner */}
+                            {/* Photo completeness banner — informational only, not blocking */}
                             {selectedVehicle.status === 'pending_before_photos' && !allBeforeCaptured && (
                                 <div className={`mt-6 px-5 py-3.5 rounded-2xl border flex items-center gap-3 text-xs font-bold ${isDark ? 'bg-amber-950/60 border-amber-800/70 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
                                     <span>⚠️</span>
-                                    <span>Incomplete: {beforeCapturedAngles}/{totalAngles} ‘Before’ photos captured. All {totalAngles} angles required.</span>
+                                    <span>Incomplete: {beforeCapturedAngles}/{totalAngles} ‘Before’ photos captured. Not compulsory — you can still submit, and you’ll be asked to confirm.</span>
                                 </div>
                             )}
                             {selectedVehicle.status === 'pending_after_photos' && !allAfterCaptured && (
                                 <div className={`mt-6 px-5 py-3.5 rounded-2xl border flex items-center gap-3 text-xs font-bold ${isDark ? 'bg-amber-950/60 border-amber-800/70 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
                                     <span>⚠️</span>
-                                    <span>Incomplete: {afterCapturedAngles}/{totalAngles} ‘After’ photos captured. All {totalAngles} angles required.</span>
+                                    <span>Incomplete: {afterCapturedAngles}/{totalAngles} ‘After’ photos captured. Not compulsory — you can still submit, and you’ll be asked to confirm.</span>
                                 </div>
                             )}
 
-                            {/* Gated stage advancement */}
+                            {/* Stage advancement — always available; incomplete sets confirm first */}
                             {selectedVehicle.status === 'pending_before_photos' && (
                                 <button onClick={handleStartRepair} className="mt-6 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-lg cursor-pointer transition-colors">
-                                    Complete “Before” Photos → Start Repair
+                                    {allBeforeCaptured ? 'Complete “Before” Photos → Start Repair' : `⚠️ Submit Incomplete “Before” Photos (${beforeCapturedAngles}/${totalAngles}) → Start Repair`}
                                 </button>
                             )}
                             {selectedVehicle.status === 'in_repair' && (
@@ -686,7 +686,7 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                             )}
                             {selectedVehicle.status === 'pending_after_photos' && (
                                 <button onClick={handleCompleteVehicle} className="mt-6 w-full bg-violet-600 hover:bg-violet-500 text-white font-extrabold py-3.5 rounded-2xl text-sm shadow-lg cursor-pointer transition-colors">
-                                    Complete “After” Photos → Mark Completed
+                                    {allAfterCaptured ? 'Complete “After” Photos → Mark Completed' : `⚠️ Submit Incomplete “After” Photos (${afterCapturedAngles}/${totalAngles}) → Mark Completed`}
                                 </button>
                             )}
                             {selectedVehicle.status === 'completed' && (

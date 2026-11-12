@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import {
     fetchThirdPartyTechnicians,
@@ -24,14 +24,26 @@ type Props = {
     vehiclePlate: string
     companyId?: string | null
     isAdmin?: boolean
+    readOnly?: boolean
+    staged?: boolean
+    onCommitReady?: (fn: (() => Promise<void>) | null) => void
+    onResetReady?: (fn: (() => Promise<void>) | null) => void
     showToast: (msg: string, type: 'success' | 'error') => void
 }
 
-export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePlate, companyId, isAdmin = false, showToast }: Props) {
+type PendingOp =
+    | { type: 'assign'; technicianId: string; specialty: string | null; fullName: string }
+    | { type: 'unassign'; assignmentId: string }
+    | { type: 'complete'; assignmentId: string }
+
+export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePlate, companyId, isAdmin = false, readOnly = false, staged = false, onCommitReady, onResetReady, showToast }: Props) {
     const [assignments, setAssignments] = useState<VehicleAssignment[]>([])
     const [techs, setTechs] = useState<ThirdPartyTech[]>([])
     const [selectedTechId, setSelectedTechId] = useState('')
     const [loading, setLoading] = useState(true)
+    const [pendingOps, setPendingOps] = useState<PendingOp[]>([])
+    const pendingOpsRef = useRef<PendingOp[]>([])
+    useEffect(() => { pendingOpsRef.current = pendingOps }, [pendingOps])
 
     const supabase = useMemo(() => createClient(), [])
 
@@ -64,6 +76,22 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
             return
         }
         const tech = techs.find(t => t.id === selectedTechId)
+        if (staged) {
+            setPendingOps(ops => [...ops, { type: 'assign', technicianId: selectedTechId, specialty: tech?.specialty || null, fullName: tech?.full_name || 'Technician' }])
+            setAssignments(as => [...as, {
+                id: `tmp-${Date.now()}`,
+                vehicle_id: vehicleId,
+                technician_id: selectedTechId,
+                specialty: tech?.specialty || null,
+                status: 'assigned',
+                created_at: new Date().toISOString(),
+                completed_at: null,
+                users: { full_name: tech?.full_name || 'Technician', specialty: tech?.specialty || null, technician_type: 'third_party' },
+            }])
+            setSelectedTechId('')
+            showToast('Assignment staged — confirm Save to apply.', 'success')
+            return
+        }
         try {
             await createAssignment(vehicleId, selectedTechId, tech?.specialty || null)
             showToast(`${tech?.full_name || 'Technician'} assigned to ${vehiclePlate}.`, 'success')
@@ -76,6 +104,12 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
     }
 
     async function handleUnassign(assignment: VehicleAssignment) {
+        if (staged) {
+            setPendingOps(ops => [...ops, { type: 'unassign', assignmentId: assignment.id }])
+            setAssignments(as => as.filter(a => a.id !== assignment.id))
+            showToast('Removal staged — confirm Save to apply.', 'success')
+            return
+        }
         try {
             await deleteAssignment(assignment.id)
             showToast('Assignment removed.', 'success')
@@ -87,6 +121,12 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
     }
 
     async function handleMarkComplete(assignment: VehicleAssignment) {
+        if (staged) {
+            setPendingOps(ops => [...ops, { type: 'complete', assignmentId: assignment.id }])
+            setAssignments(as => as.map(a => a.id === assignment.id ? { ...a, status: 'completed', completed_at: new Date().toISOString() } : a))
+            showToast('Completion staged — confirm Save to apply.', 'success')
+            return
+        }
         try {
             await completeAssignment(assignment.id)
             showToast(`Work marked complete for ${assignment.users?.full_name || 'technician'}.`, 'success')
@@ -96,6 +136,38 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
             showToast(err instanceof Error ? err.message : 'Failed to update assignment', 'error')
         }
     }
+
+    // Staged mode: register commit/reset so the parent can apply or discard pending ops.
+    async function commitPending() {
+        for (const op of pendingOpsRef.current) {
+            if (op.type === 'assign') await createAssignment(vehicleId, op.technicianId, op.specialty)
+            else if (op.type === 'unassign') await deleteAssignment(op.assignmentId)
+            else if (op.type === 'complete') await completeAssignment(op.assignmentId)
+        }
+        setPendingOps([])
+        const assignData = await fetchAssignmentsForVehicle(vehicleId)
+        setAssignments(assignData)
+    }
+
+    async function resetPending() {
+        setPendingOps([])
+        const assignData = await fetchAssignmentsForVehicle(vehicleId)
+        setAssignments(assignData)
+    }
+
+    useEffect(() => {
+        onCommitReady?.(staged ? commitPending : null)
+        onResetReady?.(staged ? resetPending : null)
+        return () => { onCommitReady?.(null); onResetReady?.(null) }
+    }, [staged])
+
+    // Exiting edit mode without committing (e.g. Back button) must not leave stale optimistic rows.
+    useEffect(() => {
+        if (!staged && pendingOpsRef.current.length > 0) {
+            setPendingOps([])
+            fetchAssignmentsForVehicle(vehicleId).then(setAssignments).catch(() => {})
+        }
+    }, [staged])
 
     const panelCard = isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'
     const labelClass = isDark ? 'text-slate-400' : 'text-slate-500'
@@ -132,7 +204,7 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
                                         </p>
                                     </div>
                                     <div className="flex flex-wrap gap-2 shrink-0">
-                                        {a.status === 'assigned' && (
+                                        {!readOnly && a.status === 'assigned' && (
                                             <button
                                                 onClick={() => handleMarkComplete(a)}
                                                 className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors"
@@ -141,20 +213,25 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
                                                 ✓ Mark Part Complete
                                             </button>
                                         )}
-                                        <button
-                                            onClick={() => handleUnassign(a)}
-                                            className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200'}`}
-                                            title="Remove assignment"
-                                        >
-                                            Remove
-                                        </button>
+                                        {!readOnly && (
+                                            <button
+                                                onClick={() => handleUnassign(a)}
+                                                className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200'}`}
+                                                title="Remove assignment"
+                                            >
+                                                Remove
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             ))}
                         </div>
                     )}
 
-                    <div className={`border rounded-2xl p-4 flex flex-col sm:flex-row gap-3 sm:items-center ${panelCard}`}>
+                    {readOnly ? (
+                        <p className={`text-[10px] font-semibold ${labelClass}`}>View-only — enable Edit Details to manage assignments.</p>
+                    ) : (
+                        <div className={`border rounded-2xl p-4 flex flex-col sm:flex-row gap-3 sm:items-center ${panelCard}`}>
                         <div className="flex-1 min-w-0">
                             <p className={`text-[11px] font-bold uppercase tracking-wider mb-1.5 ${labelClass}`}>Assign a third-party technician</p>
                             {availableTechs.length === 0 ? (
@@ -187,6 +264,7 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
                             </button>
                         )}
                     </div>
+                    )}
                 </div>
             )}
         </div>

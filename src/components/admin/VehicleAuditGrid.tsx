@@ -18,9 +18,11 @@ type VehicleAuditGridProps = {
     phase: 'before' | 'after'
     vehiclePlate: string
     onView: (url: string, title: string) => void
+    onRemove?: (item: MediaItem) => void
+    pendingRemovalIds?: string[]
 }
 
-export default function VehicleAuditGrid({ isDark, title, mediaItems, phase, vehiclePlate, onView }: VehicleAuditGridProps) {
+export default function VehicleAuditGrid({ isDark, title, mediaItems, phase, vehiclePlate, onView, onRemove, pendingRemovalIds }: VehicleAuditGridProps) {
     const mediaType = phase === 'before' ? 'photo_before' : 'photo_after'
     const capturedTextColor = phase === 'before' ? 'text-emerald-400' : 'text-blue-400'
     const missingTextColor = phase === 'before' ? 'text-rose-400' : 'text-slate-500'
@@ -43,12 +45,23 @@ export default function VehicleAuditGrid({ isDark, title, mediaItems, phase, veh
                                 </p>
                             </div>
                             {uploaded && (
-                                <PhotoThumb
-                                    url={uploaded.file_url}
-                                    alt={`${vehiclePlate} - ${cat.label} (${phase === 'before' ? 'Before' : 'After'})`}
-                                    onClick={() => onView(uploaded.file_url, `${vehiclePlate} - ${cat.label} (${phase === 'before' ? 'Before' : 'After'})`)}
-                                    className="h-24"
-                                />
+                                <>
+                                    <PhotoThumb
+                                        url={uploaded.file_url}
+                                        alt={`${vehiclePlate} - ${cat.label} (${phase === 'before' ? 'Before' : 'After'})`}
+                                        onClick={() => onView(uploaded.file_url, `${vehiclePlate} - ${cat.label} (${phase === 'before' ? 'Before' : 'After'})`)}
+                                        className="h-24"
+                                    />
+                                    {onRemove && (
+                                        <button
+                                            type="button"
+                                            onClick={() => onRemove(uploaded)}
+                                            className={`mt-2 w-full py-1.5 rounded-lg text-[10px] font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
+                                        >
+                                            {pendingRemovalIds?.includes(uploaded.id) ? '✓ Staged to Remove' : '🗑️ Remove'}
+                                        </button>
+                                    )}
+                                </>
                             )}
                         </div>
                     )

@@ -1,7 +1,9 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
+import { addWatermarkToFile } from '@/utils/watermark'
+import { uniqueFileSuffix } from '@/lib/uploadUtils'
 import { useTheme } from '@/lib/theme'
 import Toast from '@/components/ui/Toast'
 import ConfirmModal from '@/components/ui/ConfirmModal'
@@ -199,6 +201,20 @@ export default function AdminModule() {
     const [previewMedia, setPreviewMedia] = useState<PreviewMedia | null>(null)
 
     const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null)
+
+    // Staged edit session — same flow as the manager detail view: view-only by
+    // default, "Edit Details" unlocks editing, changes are staged and only
+    // applied when the user confirms Save (otherwise discarded).
+    const [editMode, setEditMode] = useState(false)
+    const [showEnterEdit, setShowEnterEdit] = useState(false)
+    const [showSaveDiscard, setShowSaveDiscard] = useState(false)
+    const [stagedVehicle, setStagedVehicle] = useState<VehicleEditPayload | null>(null)
+    const [stagedStatus, setStagedStatus] = useState<string | null>(null)
+    const [pendingDocOps, setPendingDocOps] = useState<{ type: 'upload' | 'remove'; category: string; file?: File }[]>([])
+    const [pendingPhotoRemovals, setPendingPhotoRemovals] = useState<MediaItem[]>([])
+    const [uploadingCategory, setUploadingCategory] = useState<string | null>(null)
+    const commitAssignmentsRef = useRef<(() => Promise<void>) | null>(null)
+    const resetAssignmentsRef = useRef<(() => void) | null>(null)
 
     // New Staff User Modal State
     const [showUserModal, setShowUserModal] = useState(false)
@@ -618,22 +634,6 @@ export default function AdminModule() {
         })
     }
 
-    function requestStatusOverride(newStatus: string) {
-        if (!selectedVehicle || newStatus === selectedVehicle.status) return
-        const fromLabel = STATUS_LABELS[selectedVehicle.status] || selectedVehicle.status
-        const toLabel = STATUS_LABELS[newStatus] || newStatus
-        setConfirmModal({
-            title: 'Confirm Status Override',
-            message: `Override ${selectedVehicle.plate_number} status from "${fromLabel}" to "${toLabel}"? This bypasses the normal repair flow.`,
-            confirmText: `Set to ${toLabel}`,
-            confirmVariant: 'success',
-            onConfirm: async () => {
-                setConfirmModal(null)
-                await handleStatusOverride(selectedVehicle.id, newStatus)
-            },
-        })
-    }
-
     async function handleStatusOverride(vehicleId: string, newStatus: string) {
         const { error } = await supabase
             .from('vehicles')
@@ -689,16 +689,33 @@ export default function AdminModule() {
         }
     }
 
-    async function handleSaveVehicleEdit(payload: VehicleEditPayload): Promise<boolean> {
-        if (!editingVehicle) return false
+    // ---- Staged edit session (view-only default; Edit Details unlocks) ----
 
+    function clearStaged() {
+        setStagedVehicle(null)
+        setStagedStatus(null)
+        setPendingDocOps([])
+        setPendingPhotoRemovals([])
+    }
+
+    function hasStagedChanges() {
+        return !!stagedVehicle || !!stagedStatus || pendingDocOps.length > 0 || pendingPhotoRemovals.length > 0
+    }
+
+    // Enter-edit confirm modal.
+    function requestEnterEditMode() {
+        setShowEnterEdit(true)
+    }
+
+    // ✏️ Edit Vehicle modal in edit mode stages instead of persisting.
+    async function stageVehicleEdit(payload: VehicleEditPayload): Promise<boolean> {
+        if (!selectedVehicle) return false
         try {
-            // Duplicate plate / chassis prevention (active vehicles only, excluding this one).
             const plate = payload.plate_number.trim()
             const chassis = payload.chassis_number.trim()
             const [plateRes, chassisRes] = await Promise.all([
-                supabase.from('vehicles').select('id').eq('is_deleted', false).neq('id', editingVehicle.id).eq('plate_number', plate).limit(1),
-                chassis ? supabase.from('vehicles').select('id').eq('is_deleted', false).neq('id', editingVehicle.id).eq('chassis_number', chassis).limit(1) : Promise.resolve({ data: null, error: null }),
+                supabase.from('vehicles').select('id').eq('is_deleted', false).neq('id', selectedVehicle.id).eq('plate_number', plate).limit(1),
+                chassis ? supabase.from('vehicles').select('id').eq('is_deleted', false).neq('id', selectedVehicle.id).eq('chassis_number', chassis).limit(1) : Promise.resolve({ data: null, error: null }),
             ])
             if (plateRes.data && plateRes.data.length > 0) {
                 showToast(`Another vehicle already uses plate number "${payload.plate_number}".`, 'error')
@@ -708,33 +725,147 @@ export default function AdminModule() {
                 showToast(`Another vehicle already uses chassis number "${payload.chassis_number}".`, 'error')
                 return false
             }
+            setStagedVehicle(payload)
+            setEditingVehicle(null)
+            showToast('Vehicle details staged — confirm Save to apply.', 'success')
+            return true
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Failed to stage vehicle changes'
+            showToast(msg, 'error')
+            return false
+        }
+    }
 
+    // Document staging (mirrors the manager flow).
+    async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>, category: string) {
+        const file = e.target.files?.[0]
+        if (!file || !selectedVehicle) return
+        if (file.size > 5 * 1024 * 1024) {
+            showToast('File is too large. Maximum size is 5MB.', 'error')
+            e.target.value = ''
+            return
+        }
+        setPendingDocOps(ops => [...ops.filter(o => !(o.type === 'upload' && o.category === category)), { type: 'upload', category, file }])
+        showToast(`${adminDocumentLabel(category)} queued — confirm Save to upload.`, 'success')
+        e.target.value = ''
+    }
+
+    function stageDocRemove(category: string) {
+        setPendingDocOps(ops => [...ops.filter(o => !(o.type === 'remove' && o.category === category)), { type: 'remove', category }])
+        showToast(`${adminDocumentLabel(category)} removal staged — confirm Save to apply.`, 'success')
+    }
+
+    // Photo removal staging (toggleable; staging stays in-session).
+    function requestRemovePhoto(item: MediaItem) {
+        const alreadyStaged = pendingPhotoRemovals.some(p => p.id === item.id)
+        if (alreadyStaged) {
+            setPendingPhotoRemovals(list => list.filter(p => p.id !== item.id))
+            showToast('Photo removal undone.', 'success')
+        } else {
+            setPendingPhotoRemovals(list => [...list, item])
+            showToast('Photo removal staged — confirm Save to apply.', 'success')
+        }
+    }
+
+    // Apply all staged changes on Save. Order: master record → docs (upload then
+    // remove) → photos → status → third-party assignments → refresh.
+    async function handleSaveChanges() {
+        if (!selectedVehicle) return
+
+        if (stagedVehicle) {
             const { error } = await supabase
                 .from('vehicles')
                 .update({
-                    plate_number: payload.plate_number,
-                    chassis_number: payload.chassis_number,
-                    make_model_year: payload.make_model_year,
-                    insurance_panel: payload.insurance_panel,
-                    intake_cost: payload.intake_cost,
-                    market_value: payload.market_value,
-                    repair_cost: payload.repair_cost,
+                    plate_number: stagedVehicle.plate_number,
+                    chassis_number: stagedVehicle.chassis_number,
+                    make_model_year: stagedVehicle.make_model_year,
+                    insurance_panel: stagedVehicle.insurance_panel,
+                    intake_cost: stagedVehicle.intake_cost,
+                    market_value: stagedVehicle.market_value,
+                    repair_cost: stagedVehicle.repair_cost,
                     updated_at: new Date().toISOString(),
                 })
-                .eq('id', editingVehicle.id)
-
-            if (error) throw error
-
-            showToast(`Vehicle ${payload.plate_number} updated successfully!`, 'success')
-            setSelectedVehicle((prev) => prev ? { ...prev, ...payload } : prev)
-            setEditingVehicle(null)
-            await fetchAllData()
-            return true
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : 'Failed to update vehicle'
-            showToast(msg.includes('duplicate key value violates unique constraint') ? 'Another vehicle already uses this plate or chassis number.' : msg, 'error')
-            return false
+                .eq('id', selectedVehicle.id)
+            if (error) { showToast('Error saving vehicle details: ' + error.message, 'error'); return }
+            setSelectedVehicle(prev => prev ? { ...prev, ...stagedVehicle } : prev)
         }
+
+        // Documents: uploads first, then removals.
+        for (const op of pendingDocOps) {
+            if (op.type === 'upload' && op.file) {
+                const label = adminDocumentLabel(op.category)
+                setUploadingCategory(op.category)
+                try {
+                    const watermarkLabel = `CONFIDENTIAL • ${selectedVehicle.plate_number} • ${op.category.toUpperCase()} • ${new Date().toLocaleDateString()}`
+                    const fileToUpload = await addWatermarkToFile(op.file, watermarkLabel)
+                    const existing = mediaItems.find(m => m.media_type === 'document' && m.category === op.category)
+                    if (existing) {
+                        await supabase.from('vehicle_media').delete().eq('id', existing.id)
+                    }
+                    const fileExt = fileToUpload.name.split('.').pop()?.toLowerCase() || 'jpg'
+                    const fileName = `${selectedVehicle.id}/docs/${op.category}_${uniqueFileSuffix()}.${fileExt}`
+                    const { data: uploadData, error: uploadError } = await supabase.storage
+                        .from('vehicle-files')
+                        .upload(fileName, fileToUpload, { cacheControl: '3600', upsert: true })
+                    if (uploadError) throw uploadError
+                    const { data: publicURLData } = supabase.storage.from('vehicle-files').getPublicUrl(uploadData.path)
+                    const { data: { user } } = await supabase.auth.getUser()
+                    await supabase.from('vehicle_media').insert([{
+                        vehicle_id: selectedVehicle.id,
+                        media_type: 'document',
+                        category: op.category,
+                        file_url: publicURLData.publicUrl,
+                        uploaded_by: user?.id ?? null,
+                    }])
+                } catch (err: any) {
+                    showToast(err.message || `${label} upload failed`, 'error')
+                    return
+                } finally {
+                    setUploadingCategory(null)
+                }
+            } else if (op.type === 'remove') {
+                const doc = mediaItems.find(m => m.media_type === 'document' && m.category === op.category)
+                if (doc && doc.file_url) {
+                    const pathParts = doc.file_url.split('/vehicle-files/')
+                    if (pathParts.length > 1) {
+                        try { await supabase.storage.from('vehicle-files').remove([decodeURIComponent(pathParts[1])]) } catch { /* best effort */ }
+                    }
+                }
+                await supabase.from('vehicle_media').delete().eq('vehicle_id', selectedVehicle.id).eq('media_type', 'document').eq('category', op.category)
+            }
+        }
+
+        // Photos.
+        for (const item of pendingPhotoRemovals) {
+            const pathParts = item.file_url.split('/vehicle-files/')
+            if (pathParts.length > 1) {
+                try { await supabase.storage.from('vehicle-files').remove([decodeURIComponent(pathParts[1])]) } catch { /* best effort */ }
+            }
+            await supabase.from('vehicle_media').delete().eq('id', item.id)
+        }
+
+        // Status override staged within the session.
+        if (stagedStatus && stagedStatus !== selectedVehicle.status) {
+            await handleStatusOverride(selectedVehicle.id, stagedStatus)
+        }
+
+        if (commitAssignmentsRef.current) await commitAssignmentsRef.current()
+
+        clearStaged()
+        setEditMode(false)
+        setShowSaveDiscard(false)
+        await fetchAllData()
+        if (selectedVehicle) await fetchMedia(selectedVehicle.id)
+        showToast('Changes saved.', 'success')
+    }
+
+    function handleDiscardChanges() {
+        clearStaged()
+        setEditMode(false)
+        setShowSaveDiscard(false)
+        if (resetAssignmentsRef.current) resetAssignmentsRef.current()
+        if (selectedVehicle) fetchMedia(selectedVehicle.id)
+        showToast('Changes discarded.', 'success')
     }
 
     function requestPermanentDelete(vehicleId: string, plate: string) {
@@ -942,6 +1073,45 @@ export default function AdminModule() {
                 />
             )}
 
+            {/* Enter Edit Mode confirm — same flow as the manager detail view */}
+            {showEnterEdit && (
+                <ConfirmModal
+                    title="Enter Edit Mode?"
+                    message="You can edit price, documents, photos, and third-party technicians. Changes are staged and only saved when you confirm Save."
+                    confirmText="Start Editing"
+                    confirmVariant="success"
+                    onConfirm={() => { setShowEnterEdit(false); setEditMode(true) }}
+                    onCancel={() => setShowEnterEdit(false)}
+                    isDark={isDark}
+                />
+            )}
+
+            {/* Save / Discard confirm — same modal as the manager detail view */}
+            {showSaveDiscard && (
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+                    <div className={`border rounded-3xl shadow-2xl max-w-sm w-full p-6 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
+                        <h3 className="text-lg font-extrabold mb-1">💾 Save Changes?</h3>
+                        <p className={`text-xs mb-5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Apply your staged changes to this vehicle, or discard them? Unsaved changes will be lost.</p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={handleDiscardChanges}
+                                className={`px-5 py-2.5 rounded-xl text-xs font-bold cursor-pointer border ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
+                            >
+                                Discard Changes
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveChanges}
+                                className="px-6 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer shadow-lg shadow-emerald-500/20"
+                            >
+                                Save Changes
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <PreviewModal preview={previewMedia} onClose={() => setPreviewMedia(null)} onDownload={handleDownload} onNavigate={(index) => setPreviewMedia(prev => (prev ? { ...prev, index } : prev))} isDark={isDark} />
 
             {/* Customize Sections Modal */}
@@ -1048,14 +1218,16 @@ export default function AdminModule() {
                 />
             )}
 
-            {/* Edit Vehicle Modal */}
+            {/* Edit Vehicle Modal — in edit mode this stages; outside an edit
+                session it would persist directly, but the header button is only
+                shown while editing, so it always stages. */}
             {editingVehicle && (
                 <VehicleEditModal
                     key={editingVehicle.id}
                     vehicle={editingVehicle}
                     isDark={isDark}
                     onClose={() => setEditingVehicle(null)}
-                    onSave={handleSaveVehicleEdit}
+                    onSave={stageVehicleEdit}
                 />
             )}
 
@@ -1289,7 +1461,7 @@ export default function AdminModule() {
                                             </button>
                                             <button
                                                 type="button"
-                                                onClick={(e) => { e.stopPropagation(); setEditingVehicle(v); }}
+                                                onClick={(e) => { e.stopPropagation(); setEditMode(true); setSelectedVehicle(v); fetchMedia(v.id); }}
                                                 className={`px-3 py-2.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-amber-700 border-slate-200'}`}
                                                 title="Edit Vehicle"
                                             >
@@ -1315,7 +1487,10 @@ export default function AdminModule() {
                 {activeTab === 'vehicles' && selectedVehicle && (
                     <div>
                         <button
-                            onClick={() => setSelectedVehicle(null)}
+                            onClick={() => {
+                                if (editMode && hasStagedChanges()) setShowSaveDiscard(true)
+                                else setSelectedVehicle(null)
+                            }}
                             className={`mb-6 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer px-3.5 py-2 rounded-xl border w-fit shadow-xs ${isDark ? 'bg-slate-950 text-purple-400 hover:text-purple-300 border-slate-800' : 'bg-white text-purple-600 hover:text-purple-700 border-slate-200'}`}
                         >
                             &larr; Back to Fleet Registry
@@ -1325,26 +1500,61 @@ export default function AdminModule() {
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                                 <div>
                                     <div className="flex flex-wrap items-center gap-3">
-                                        <h2 className="text-2xl sm:text-3xl font-black tracking-tight">{selectedVehicle.plate_number}</h2>
-                                        <StatusBadge status={selectedVehicle.status} />
+                                        <h2 className="text-2xl sm:text-3xl font-black tracking-tight">{stagedVehicle?.plate_number || selectedVehicle.plate_number}</h2>
+                                        <StatusBadge status={stagedStatus || selectedVehicle.status} />
                                     </div>
-                                    <p className="text-xs font-semibold text-slate-400 mt-1">{selectedVehicle.make_model_year} • VIN: {selectedVehicle.chassis_number}</p>
+                                    <p className="text-xs font-semibold text-slate-400 mt-1">{(stagedVehicle?.make_model_year || selectedVehicle.make_model_year)} • VIN: {stagedVehicle?.chassis_number || selectedVehicle.chassis_number}</p>
+                                    {stagedVehicle && (
+                                        <p className="text-[11px] font-bold uppercase tracking-wider mt-2 text-purple-400">
+                                            ● Vehicle details staged — Intake RM {stagedVehicle.intake_cost.toLocaleString()} • Market RM {stagedVehicle.market_value.toLocaleString()} • Repair RM {stagedVehicle.repair_cost.toLocaleString()}
+                                        </p>
+                                    )}
+                                    {stagedStatus && stagedStatus !== selectedVehicle.status && (
+                                        <p className="text-[11px] font-bold uppercase tracking-wider mt-1 text-purple-400">
+                                            ● Status change staged: {(STATUS_LABELS[stagedStatus] || stagedStatus).toUpperCase()}
+                                        </p>
+                                    )}
                                 </div>
 
                                 <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                                    <button
-                                        type="button"
-                                        onClick={() => setEditingVehicle(selectedVehicle)}
-                                        className="px-4 py-2.5 rounded-2xl border text-xs font-bold transition-all shadow-md cursor-pointer bg-amber-600 hover:bg-amber-500 text-white border-amber-500"
-                                    >
-                                        ✏️ Edit Vehicle
-                                    </button>
+                                    {editMode ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => editMode ? (hasStagedChanges() ? setShowSaveDiscard(true) : handleSaveChanges()) : requestEnterEditMode()}
+                                            className="px-4 py-2.5 rounded-2xl border text-xs font-bold transition-all shadow-md cursor-pointer bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500"
+                                        >
+                                            💾 Save Changes
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={requestEnterEditMode}
+                                            className="px-4 py-2.5 rounded-2xl border text-xs font-bold transition-all shadow-md cursor-pointer bg-blue-600 hover:bg-blue-500 text-white border-blue-500"
+                                        >
+                                            ✏️ Edit Details
+                                        </button>
+                                    )}
+                                    {editMode && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setEditingVehicle(selectedVehicle)}
+                                            className="px-4 py-2.5 rounded-2xl border text-xs font-bold transition-all shadow-md cursor-pointer bg-amber-600 hover:bg-amber-500 text-white border-amber-500"
+                                        >
+                                            ✏️ Edit Vehicle
+                                        </button>
+                                    )}
                                     <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center gap-3 w-full md:w-auto ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                         <span className="text-xs font-black uppercase text-purple-400">Admin Override Status:</span>
                                         <select
-                                            value={selectedVehicle.status}
-                                            onChange={(e) => requestStatusOverride(e.target.value)}
-                                            className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                                            value={stagedStatus || selectedVehicle.status}
+                                            disabled={!editMode}
+                                            onChange={(e) => {
+                                                if (!editMode) return
+                                                if (e.target.value === selectedVehicle.status) { setStagedStatus(null); return }
+                                                setStagedStatus(e.target.value)
+                                                showToast('Status change staged — confirm Save to apply.', 'success')
+                                            }}
+                                            className={`border rounded-xl p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
                                         >
                                             <option value="intake">Intake</option>
                                             <option value="pending_before_photos">Pending Before Photos</option>
@@ -1366,20 +1576,48 @@ export default function AdminModule() {
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                                     {DOCUMENT_CATEGORIES.map((cat) => {
                                         const doc = mediaItems.find(m => m.media_type === 'document' && m.category === cat)
+                                        const queuedUpload = pendingDocOps.some(o => o.type === 'upload' && o.category === cat)
+                                        const queuedRemove = pendingDocOps.some(o => o.type === 'remove' && o.category === cat)
                                         return (
                                             <div key={cat} className={`border rounded-2xl p-4 flex flex-col justify-between ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                                                 <div>
                                                     <p className="text-xs font-extrabold uppercase tracking-wider mb-1">{adminDocumentLabel(cat)}</p>
                                                     <p className={`text-xs font-semibold mb-4 ${doc ? 'text-emerald-400' : 'text-slate-500'}`}>{doc ? '✓ Uploaded' : 'Missing'}</p>
+                                                    {editMode && queuedRemove && (
+                                                        <p className="-mt-3 mb-3 text-[9px] font-bold uppercase tracking-wider text-rose-400">● Will be removed on save</p>
+                                                    )}
+                                                    {editMode && queuedUpload && (
+                                                        <p className="-mt-3 mb-3 text-[9px] font-bold uppercase tracking-wider text-purple-400">● Queued — upload on save</p>
+                                                    )}
                                                 </div>
-                                                {doc && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setPreviewMedia({ items: [{ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${adminDocumentLabel(cat)}` }], index: 0 })}
-                                                        className={`w-full text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-600 border-slate-200'}`}
-                                                    >
-                                                        View Document
-                                                    </button>
+                                                {doc ? (
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setPreviewMedia({ items: [{ url: doc.file_url, title: `${selectedVehicle.plate_number} - ${adminDocumentLabel(cat)}` }], index: 0 })}
+                                                            className={`${editMode ? 'w-1/2' : 'w-full'} text-center py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-purple-600 border-slate-200'}`}
+                                                        >
+                                                            View Document
+                                                        </button>
+                                                        {editMode && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => stageDocRemove(cat)}
+                                                                className={`w-1/2 py-2 rounded-xl text-xs font-bold transition-colors border cursor-pointer ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'}`}
+                                                            >
+                                                                Remove
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    editMode && (
+                                                        <div>
+                                                            <label htmlFor={`admin-file-${cat}`} className="w-full block text-center bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-xl text-xs font-bold cursor-pointer shadow-md">
+                                                                {uploadingCategory === cat ? 'Uploading…' : 'Upload File'}
+                                                            </label>
+                                                            <input id={`admin-file-${cat}`} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => handleFileSelect(e, cat)} />
+                                                        </div>
+                                                    )
                                                 )}
                                             </div>
                                         )
@@ -1394,6 +1632,10 @@ export default function AdminModule() {
                                     vehiclePlate={selectedVehicle.plate_number}
                                     companyId={null}
                                     isAdmin
+                                    readOnly={!editMode}
+                                    staged={editMode}
+                                    onCommitReady={(fn) => { commitAssignmentsRef.current = fn }}
+                                    onResetReady={(fn) => { resetAssignmentsRef.current = fn }}
                                     showToast={showToast}
                                 />
                             </div>
@@ -1406,6 +1648,8 @@ export default function AdminModule() {
                                     phase="before"
                                     vehiclePlate={selectedVehicle.plate_number}
                                     onView={(url) => openPhaseGallery('photo_before', url)}
+                                    onRemove={editMode ? requestRemovePhoto : undefined}
+                                    pendingRemovalIds={editMode ? pendingPhotoRemovals.map(p => p.id) : undefined}
                                 />
                             )}
 
@@ -1417,6 +1661,8 @@ export default function AdminModule() {
                                     phase="after"
                                     vehiclePlate={selectedVehicle.plate_number}
                                     onView={(url) => openPhaseGallery('photo_after', url)}
+                                    onRemove={editMode ? requestRemovePhoto : undefined}
+                                    pendingRemovalIds={editMode ? pendingPhotoRemovals.map(p => p.id) : undefined}
                                 />
                             )}
 
@@ -1426,6 +1672,8 @@ export default function AdminModule() {
                                     mediaItems={mediaItems}
                                     vehiclePlate={selectedVehicle.plate_number}
                                     onView={(url) => openAdditionalGallery(url)}
+                                    onRemove={editMode ? requestRemovePhoto : undefined}
+                                    pendingRemovalIds={editMode ? pendingPhotoRemovals.map(p => p.id) : undefined}
                                 />
                             )}
                         </div>
