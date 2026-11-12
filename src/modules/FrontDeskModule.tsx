@@ -18,9 +18,10 @@ import Card from '@/components/ui/Card'
 import StatusBadge from '@/components/ui/StatusBadge'
 import SectionHeading from '@/components/ui/SectionHeading'
 import EmptyState from '@/components/ui/EmptyState'
-import SearchField from '@/components/ui/SearchField'
 import ResponsiveTable from '@/components/ui/ResponsiveTable'
+import VehicleToolbar from '@/components/ui/VehicleToolbar'
 import { filterVehicles } from '@/lib/vehicleSearch'
+import { applyVehicleFilters, DEFAULT_VEHICLE_FILTERS, type VehicleFilters } from '@/lib/vehicleFilters'
 
 type Vehicle = {
   id: string
@@ -84,7 +85,8 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
   const [loading, setLoading] = useState(true)
   const [vehicleQuery, setVehicleQuery] = useState('')
-  const filteredVehicles = filterVehicles(vehicles, vehicleQuery)
+  const [vehicleFilters, setVehicleFilters] = useState<VehicleFilters>(DEFAULT_VEHICLE_FILTERS)
+  const filteredVehicles = applyVehicleFilters(filterVehicles(vehicles, vehicleQuery), vehicleFilters)
   const additionalPhotos = mediaItems.filter(m => m.media_type === 'photo_additional')
   const photoStage = selectedVehicle ? getPhotoStageRules(selectedVehicle.status) : null
   const showBefore = photoStage?.before !== 'hidden'
@@ -1145,12 +1147,17 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
             />
 
             {!loading && vehicles.length > 0 && (
-              <SearchField
+              <VehicleToolbar
                 isDark={isDark}
-                value={vehicleQuery}
-                onChange={setVehicleQuery}
+                vehicles={vehicles}
+                query={vehicleQuery}
+                onQueryChange={setVehicleQuery}
+                filters={vehicleFilters}
+                onFiltersChange={setVehicleFilters}
+                shown={filteredVehicles.length}
+                total={vehicles.length}
                 accent="blue"
-                resultLabel={`Showing ${filteredVehicles.length} of ${vehicles.length} vehicles`}
+                placeholder="Search plate, model, VIN, panel…"
               />
             )}
 
@@ -1159,7 +1166,7 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
             ) : vehicles.length === 0 ? (
               <EmptyState isDark={isDark} message="No vehicles found. Click “+ Add Vehicle” to get started." />
             ) : filteredVehicles.length === 0 ? (
-              <EmptyState isDark={isDark} message={`No vehicles match “${vehicleQuery.trim()}”.`} />
+              <EmptyState isDark={isDark} message="No vehicles match your search and filters." />
             ) : (
               <>
                 <div className="hidden md:block">

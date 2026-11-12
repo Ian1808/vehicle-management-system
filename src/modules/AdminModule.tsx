@@ -12,8 +12,9 @@ import Card from '@/components/ui/Card'
 import StatusBadge from '@/components/ui/StatusBadge'
 import SectionHeading from '@/components/ui/SectionHeading'
 import EmptyState from '@/components/ui/EmptyState'
-import SearchField from '@/components/ui/SearchField'
 import { filterVehicles } from '@/lib/vehicleSearch'
+import { applyVehicleFilters, DEFAULT_VEHICLE_FILTERS, type VehicleFilters } from '@/lib/vehicleFilters'
+import VehicleToolbar from '@/components/ui/VehicleToolbar'
 import ResponsiveTable from '@/components/ui/ResponsiveTable'
 import CompanyNameModal from '@/components/ui/CompanyNameModal'
 import StaffUserModal, { type StaffUserPayload } from '@/components/admin/StaffUserModal'
@@ -187,7 +188,8 @@ export default function AdminModule() {
     }
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [vehicleQuery, setVehicleQuery] = useState('')
-    const filteredVehicles = filterVehicles(vehicles, vehicleQuery)
+    const [vehicleFilters, setVehicleFilters] = useState<VehicleFilters>(DEFAULT_VEHICLE_FILTERS)
+    const filteredVehicles = applyVehicleFilters(filterVehicles(vehicles, vehicleQuery), vehicleFilters)
     const [deletedVehicles, setDeletedVehicles] = useState<Vehicle[]>([])
     const [banks, setBanks] = useState<AdminBankRow[]>([])
     const [insurancePanels, setInsurancePanels] = useState<InsurancePanelRecord[]>([])
@@ -1425,16 +1427,20 @@ export default function AdminModule() {
                             <EmptyState isDark={isDark} message="No vehicles found in the master registry." />
                         ) : (
                             <>
-                            <SearchField
+                            <VehicleToolbar
                                 isDark={isDark}
-                                value={vehicleQuery}
-                                onChange={setVehicleQuery}
+                                vehicles={vehicles}
+                                query={vehicleQuery}
+                                onQueryChange={setVehicleQuery}
+                                filters={vehicleFilters}
+                                onFiltersChange={setVehicleFilters}
+                                shown={filteredVehicles.length}
+                                total={vehicles.length}
                                 accent="purple"
-                                placeholder="Search by plate, model, chassis, panel, company or status…"
-                                resultLabel={`Showing ${filteredVehicles.length} of ${vehicles.length} vehicles`}
+                                placeholder="Search plate, model, VIN, panel, company…"
                             />
                             {filteredVehicles.length === 0 ? (
-                                <EmptyState isDark={isDark} message={`No vehicles match “${vehicleQuery.trim()}”.`} />
+                                <EmptyState isDark={isDark} message="No vehicles match your search and filters." />
                             ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                                 {filteredVehicles.map((v) => (

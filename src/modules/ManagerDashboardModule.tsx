@@ -7,9 +7,10 @@ import Toast from '@/components/ui/Toast'
 import Card from '@/components/ui/Card'
 import SectionHeading from '@/components/ui/SectionHeading'
 import EmptyState from '@/components/ui/EmptyState'
-import SearchField from '@/components/ui/SearchField'
 import StatusBadge from '@/components/ui/StatusBadge'
+import VehicleToolbar from '@/components/ui/VehicleToolbar'
 import { filterVehicles } from '@/lib/vehicleSearch'
+import { applyVehicleFilters, DEFAULT_VEHICLE_FILTERS, type VehicleFilters } from '@/lib/vehicleFilters'
 import CompanyNameModal from '@/components/ui/CompanyNameModal'
 import VehicleEditModal, { type VehicleEditPayload } from '@/components/admin/VehicleEditModal'
 import FrontDeskModule from '@/modules/FrontDeskModule'
@@ -57,7 +58,8 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
     const [vehicles, setVehicles] = useState<CompanyVehicle[]>([])
     const [staff, setStaff] = useState<CompanyStaff[]>([])
     const [vehicleQuery, setVehicleQuery] = useState('')
-    const filteredVehicles = filterVehicles(vehicles, vehicleQuery)
+    const [vehicleFilters, setVehicleFilters] = useState<VehicleFilters>(DEFAULT_VEHICLE_FILTERS)
+    const filteredVehicles = applyVehicleFilters(filterVehicles(vehicles, vehicleQuery), vehicleFilters)
     const [editCompanyOpen, setEditCompanyOpen] = useState(false)
     const [editingVehicle, setEditingVehicle] = useState<CompanyVehicle | null>(null)
     // Opening a fleet vehicle renders its full detail directly in place (no redirect to Front Desk)
@@ -373,15 +375,19 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                             <EmptyState isDark={isDark} message="No active vehicles under this company yet. Register one from Front Desk Work." />
                         ) : (
                             <>
-                            <SearchField
+                            <VehicleToolbar
                                 isDark={isDark}
-                                value={vehicleQuery}
-                                onChange={setVehicleQuery}
+                                vehicles={vehicles}
+                                query={vehicleQuery}
+                                onQueryChange={setVehicleQuery}
+                                filters={vehicleFilters}
+                                onFiltersChange={setVehicleFilters}
+                                shown={filteredVehicles.length}
+                                total={vehicles.length}
                                 accent="purple"
-                                resultLabel={`Showing ${filteredVehicles.length} of ${vehicles.length} vehicles`}
                             />
                             {filteredVehicles.length === 0 ? (
-                                <EmptyState isDark={isDark} message={`No vehicles match “${vehicleQuery.trim()}”.`} />
+                                <EmptyState isDark={isDark} message="No vehicles match your search and filters." />
                             ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                                 {filteredVehicles.map((v) => (

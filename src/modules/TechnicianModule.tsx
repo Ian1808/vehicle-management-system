@@ -16,9 +16,10 @@ import Card from '@/components/ui/Card'
 import StatusBadge from '@/components/ui/StatusBadge'
 import SectionHeading from '@/components/ui/SectionHeading'
 import EmptyState from '@/components/ui/EmptyState'
-import SearchField from '@/components/ui/SearchField'
 import ResponsiveTable from '@/components/ui/ResponsiveTable'
+import VehicleToolbar from '@/components/ui/VehicleToolbar'
 import { filterVehicles } from '@/lib/vehicleSearch'
+import { applyVehicleFilters, DEFAULT_VEHICLE_FILTERS, type VehicleFilters } from '@/lib/vehicleFilters'
 import PhotoEvidenceCell from '@/components/technician/PhotoEvidenceCell'
 
 type Vehicle = {
@@ -51,7 +52,8 @@ type PreviewState = { items: { url: string; title: string }[]; index: number } |
 export default function TechnicianModule({ embedded = false }: { embedded?: boolean }) {
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
     const [vehicleQuery, setVehicleQuery] = useState('')
-    const filteredVehicles = filterVehicles(vehicles, vehicleQuery)
+    const [vehicleFilters, setVehicleFilters] = useState<VehicleFilters>(DEFAULT_VEHICLE_FILTERS)
+    const filteredVehicles = applyVehicleFilters(filterVehicles(vehicles, vehicleQuery), vehicleFilters)
     const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
     const [myAssignments, setMyAssignments] = useState<VehicleAssignment[]>([])
@@ -886,15 +888,20 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                             <EmptyState isDark={isDark} message="No vehicles currently assigned to the workshop queue." />
                         ) : (
                             <>
-                            <SearchField
+                            <VehicleToolbar
                                 isDark={isDark}
-                                value={vehicleQuery}
-                                onChange={setVehicleQuery}
+                                vehicles={vehicles}
+                                query={vehicleQuery}
+                                onQueryChange={setVehicleQuery}
+                                filters={vehicleFilters}
+                                onFiltersChange={setVehicleFilters}
+                                shown={filteredVehicles.length}
+                                total={vehicles.length}
                                 accent="emerald"
-                                resultLabel={`Showing ${filteredVehicles.length} of ${vehicles.length} vehicles`}
+                                placeholder="Search plate, model, VIN…"
                             />
                             {filteredVehicles.length === 0 ? (
-                                <EmptyState isDark={isDark} message={`No vehicles match “${vehicleQuery.trim()}”.`} />
+                                <EmptyState isDark={isDark} message="No vehicles match your search and filters." />
                             ) : (
                             <>
                             <div className="hidden md:block">
