@@ -12,6 +12,8 @@ import Card from '@/components/ui/Card'
 import StatusBadge from '@/components/ui/StatusBadge'
 import SectionHeading from '@/components/ui/SectionHeading'
 import EmptyState from '@/components/ui/EmptyState'
+import SearchField from '@/components/ui/SearchField'
+import { filterVehicles } from '@/lib/vehicleSearch'
 import ResponsiveTable from '@/components/ui/ResponsiveTable'
 import CompanyNameModal from '@/components/ui/CompanyNameModal'
 import StaffUserModal, { type StaffUserPayload } from '@/components/admin/StaffUserModal'
@@ -184,6 +186,8 @@ export default function AdminModule() {
         setHiddenSections([])
     }
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
+    const [vehicleQuery, setVehicleQuery] = useState('')
+    const filteredVehicles = filterVehicles(vehicles, vehicleQuery)
     const [deletedVehicles, setDeletedVehicles] = useState<Vehicle[]>([])
     const [banks, setBanks] = useState<AdminBankRow[]>([])
     const [insurancePanels, setInsurancePanels] = useState<InsurancePanelRecord[]>([])
@@ -1420,8 +1424,20 @@ export default function AdminModule() {
                         ) : vehicles.length === 0 ? (
                             <EmptyState isDark={isDark} message="No vehicles found in the master registry." />
                         ) : (
+                            <>
+                            <SearchField
+                                isDark={isDark}
+                                value={vehicleQuery}
+                                onChange={setVehicleQuery}
+                                accent="purple"
+                                placeholder="Search by plate, model, chassis, panel, company or status…"
+                                resultLabel={`Showing ${filteredVehicles.length} of ${vehicles.length} vehicles`}
+                            />
+                            {filteredVehicles.length === 0 ? (
+                                <EmptyState isDark={isDark} message={`No vehicles match “${vehicleQuery.trim()}”.`} />
+                            ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                                {vehicles.map((v) => (
+                                {filteredVehicles.map((v) => (
                                     <Card
                                         key={v.id}
                                         isDark={isDark}
@@ -1479,6 +1495,8 @@ export default function AdminModule() {
                                     </Card>
                                 ))}
                             </div>
+                            )}
+                            </>
                         )}
                     </div>
                 )}

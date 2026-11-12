@@ -10,6 +10,12 @@ import {
     deleteAssignment,
     type VehicleAssignment,
 } from '@/services/assignmentService'
+import { fetchVehicleMedia } from '@/services/vehicleService'
+
+// Photos uploaded by a third-party technician are stored as photo_additional with a
+// category that carries the assignment id, so evidence can be grouped per assignment:
+//   extra_3p_<specialty slug>_<first 8 of assignment id>
+export const thirdPartyPhotoToken = (assignmentId: string) => assignmentId.slice(0, 8)
 
 type ThirdPartyTech = {
     id: string
@@ -41,6 +47,8 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
     const [techs, setTechs] = useState<ThirdPartyTech[]>([])
     const [selectedTechId, setSelectedTechId] = useState('')
     const [loading, setLoading] = useState(true)
+    const [media, setMedia] = useState<{ id: string; media_type: string; category: string | null; file_url: string }[]>([])
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null)
     const [pendingOps, setPendingOps] = useState<PendingOp[]>([])
     const pendingOpsRef = useRef<PendingOp[]>([])
     useEffect(() => { pendingOpsRef.current = pendingOps }, [pendingOps])
@@ -51,12 +59,14 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
         async function load() {
             if (!vehicleId) return
             try {
-                const [assignData, techData] = await Promise.all([
+                const [assignData, techData, mediaData] = await Promise.all([
                     fetchAssignmentsForVehicle(vehicleId),
                     fetchThirdPartyTechnicians(companyId, isAdmin),
+                    fetchVehicleMedia(vehicleId),
                 ])
                 setAssignments(assignData)
                 setTechs(techData)
+                setMedia(mediaData as any)
                 setSelectedTechId('')
             } catch (err) {
                 showToast(err instanceof Error ? err.message : 'Failed to load assignments', 'error')
@@ -69,6 +79,10 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
 
     const assignedTechIds = new Set(assignments.map(a => a.technician_id))
     const availableTechs = techs.filter(t => !assignedTechIds.has(t.id))
+    const photosFor = (assignmentId: string) => media.filter(m => {
+        const cat = m.category || ''
+        return m.media_type === 'photo_additional' && cat.startsWith('extra_3p_') && cat.includes(thirdPartyPhotoToken(assignmentId))
+    })
 
     async function handleAssign() {
         if (!selectedTechId) {
@@ -186,45 +200,76 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
                         <p className={`text-xs font-semibold ${labelClass}`}>No third-party technicians assigned to this vehicle yet.</p>
                     ) : (
                         <div className="space-y-3">
-                            {assignments.map((a) => (
-                                <div key={a.id} className={`border rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${panelCard}`}>
-                                    <div className="min-w-0">
-                                        <p className={`text-sm font-black truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                                            {a.users?.full_name || 'Technician'}
-                                            {a.specialty && (
-                                                <span className={`ml-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${isDark ? 'bg-purple-950 text-purple-300 border-purple-800' : 'bg-purple-50 text-purple-600 border-purple-200'}`}>
-                                                    {a.specialty}
-                                                </span>
+                            {assignments.map((a) => {
+                                const photos = photosFor(a.id)
+                                const hasEvidence = photos.length > 0
+                                return (
+                                <div key={a.id} className={`border rounded-2xl p-4 flex flex-col gap-3 ${panelCard}`}>
+                                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <p className={`text-sm font-black truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                                                {a.users?.full_name || 'Technician'}
+                                                {a.specialty && (
+                                                    <span className={`ml-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${isDark ? 'bg-purple-950 text-purple-300 border-purple-800' : 'bg-purple-50 text-purple-600 border-purple-200'}`}>
+                                                        {a.specialty}
+                                                    </span>
+                                                )}
+                                            </p>
+                                            <p className={`text-[11px] mt-1 ${labelClass}`}>
+                                                {a.status === 'completed'
+                                                    ? `✓ Completed ${a.completed_at ? new Date(a.completed_at).toLocaleString() : ''}`
+                                                    : `Assigned ${new Date(a.created_at).toLocaleString()}`}
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 shrink-0">
+                                            {!readOnly && a.status === 'assigned' && (
+                                                <button
+                                                    onClick={() => handleMarkComplete(a)}
+                                                    disabled={!hasEvidence}
+                                                    title={hasEvidence ? 'Mark this part complete' : 'Attach at least one work photo before completing'}
+                                                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors ${hasEvidence
+                                                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
+                                                        : isDark ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+                                                >
+                                                    ✓ Mark Part Complete
+                                                </button>
                                             )}
-                                        </p>
-                                        <p className={`text-[11px] mt-1 ${labelClass}`}>
-                                            {a.status === 'completed'
-                                                ? `✓ Completed ${a.completed_at ? new Date(a.completed_at).toLocaleString() : ''}`
-                                                : `Assigned ${new Date(a.created_at).toLocaleString()} — pending photos`}
-                                        </p>
+                                            {!readOnly && (
+                                                <button
+                                                    onClick={() => handleUnassign(a)}
+                                                    className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200'}`}
+                                                    title="Remove assignment"
+                                                >
+                                                    Remove
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
-                                    <div className="flex flex-wrap gap-2 shrink-0">
-                                        {!readOnly && a.status === 'assigned' && (
-                                            <button
-                                                onClick={() => handleMarkComplete(a)}
-                                                className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors"
-                                                title="Mark this part complete (photos still viewable)"
-                                            >
-                                                ✓ Mark Part Complete
-                                            </button>
-                                        )}
-                                        {!readOnly && (
-                                            <button
-                                                onClick={() => handleUnassign(a)}
-                                                className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${isDark ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-900' : 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200'}`}
-                                                title="Remove assignment"
-                                            >
-                                                Remove
-                                            </button>
-                                        )}
-                                    </div>
+
+                                    {/* Work evidence attached by the third-party technician */}
+                                    {hasEvidence ? (
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            {photos.map(ph => (
+                                                <button
+                                                    key={ph.id}
+                                                    onClick={() => setPreviewUrl(ph.file_url)}
+                                                    className={`w-16 h-16 rounded-lg overflow-hidden border cursor-pointer hover:opacity-80 transition-opacity ${isDark ? 'border-slate-700' : 'border-slate-300'}`}
+                                                    title="View work photo"
+                                                >
+                                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                    <img src={ph.file_url} alt="Third-party work evidence" className="w-full h-full object-cover" />
+                                                </button>
+                                            ))}
+                                            <span className={`text-[10px] font-bold uppercase tracking-wider ${labelClass}`}>{photos.length} photo{photos.length > 1 ? 's' : ''} attached</span>
+                                        </div>
+                                    ) : (
+                                        <div className={`rounded-xl border px-3 py-2 text-[10px] font-bold uppercase tracking-wider ${isDark ? 'border-amber-800 bg-amber-950/40 text-amber-300' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                                            ⚠ Photo evidence required — technician must attach a work photo{a.status === 'assigned' ? ' before this part can be completed' : ''}
+                                        </div>
+                                    )}
                                 </div>
-                            ))}
+                                )
+                            })}
                         </div>
                     )}
 
@@ -265,6 +310,21 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
                         )}
                     </div>
                     )}
+                </div>
+            )}
+
+            {previewUrl && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4" onClick={() => setPreviewUrl(null)}>
+                    <div className="max-h-full max-w-full overflow-auto" onClick={(e) => e.stopPropagation()}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={previewUrl} alt="Third-party work evidence" className="max-h-[85vh] rounded-2xl border border-slate-700" />
+                        <button
+                            onClick={() => setPreviewUrl(null)}
+                            className="mt-3 w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold cursor-pointer"
+                        >
+                            Close preview
+                        </button>
+                    </div>
                 </div>
             )}
         </div>

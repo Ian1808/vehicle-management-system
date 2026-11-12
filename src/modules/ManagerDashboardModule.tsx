@@ -7,7 +7,9 @@ import Toast from '@/components/ui/Toast'
 import Card from '@/components/ui/Card'
 import SectionHeading from '@/components/ui/SectionHeading'
 import EmptyState from '@/components/ui/EmptyState'
+import SearchField from '@/components/ui/SearchField'
 import StatusBadge from '@/components/ui/StatusBadge'
+import { filterVehicles } from '@/lib/vehicleSearch'
 import CompanyNameModal from '@/components/ui/CompanyNameModal'
 import VehicleEditModal, { type VehicleEditPayload } from '@/components/admin/VehicleEditModal'
 import FrontDeskModule from '@/modules/FrontDeskModule'
@@ -54,6 +56,8 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
     const [companies, setCompanies] = useState<{ id: string; name: string }[]>([])
     const [vehicles, setVehicles] = useState<CompanyVehicle[]>([])
     const [staff, setStaff] = useState<CompanyStaff[]>([])
+    const [vehicleQuery, setVehicleQuery] = useState('')
+    const filteredVehicles = filterVehicles(vehicles, vehicleQuery)
     const [editCompanyOpen, setEditCompanyOpen] = useState(false)
     const [editingVehicle, setEditingVehicle] = useState<CompanyVehicle | null>(null)
     // Opening a fleet vehicle renders its full detail directly in place (no redirect to Front Desk)
@@ -217,7 +221,7 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
     // ---- Company metrics ----
     const intake = vehicles.reduce((a, v) => a + Number(v.intake_cost || 0), 0)
     const market = vehicles.reduce((a, v) => a + Number(v.market_value || 0), 0)
-    const repair = 0 // repair outlay is tracked per vehicle during the flow; keep visible as RM 0 until wired
+    const repair = vehicles.reduce((a, v) => a + Number(v.repair_cost || 0), 0)
     const profit = market - (intake + repair)
 
     const fleetStats = {
@@ -368,8 +372,19 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                         {vehicles.length === 0 ? (
                             <EmptyState isDark={isDark} message="No active vehicles under this company yet. Register one from Front Desk Work." />
                         ) : (
+                            <>
+                            <SearchField
+                                isDark={isDark}
+                                value={vehicleQuery}
+                                onChange={setVehicleQuery}
+                                accent="purple"
+                                resultLabel={`Showing ${filteredVehicles.length} of ${vehicles.length} vehicles`}
+                            />
+                            {filteredVehicles.length === 0 ? (
+                                <EmptyState isDark={isDark} message={`No vehicles match “${vehicleQuery.trim()}”.`} />
+                            ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                                {vehicles.map((v) => (
+                                {filteredVehicles.map((v) => (
                                     <Card key={v.id} isDark={isDark} className="p-6 shadow-xl">
                                         <div className="flex justify-between items-start gap-2 mb-3">
                                             <h4 className={`text-lg font-black tracking-tight ${isDark ? 'text-white' : 'text-blue-950'}`}>{v.plate_number}</h4>
@@ -399,6 +414,8 @@ export default function ManagerDashboardModule({ embedded = false }: { embedded?
                                     </Card>
                                 ))}
                             </div>
+                            )}
+                            </>
                         )}
                     </>
                 )}

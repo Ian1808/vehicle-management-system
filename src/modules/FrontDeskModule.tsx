@@ -18,7 +18,9 @@ import Card from '@/components/ui/Card'
 import StatusBadge from '@/components/ui/StatusBadge'
 import SectionHeading from '@/components/ui/SectionHeading'
 import EmptyState from '@/components/ui/EmptyState'
+import SearchField from '@/components/ui/SearchField'
 import ResponsiveTable from '@/components/ui/ResponsiveTable'
+import { filterVehicles } from '@/lib/vehicleSearch'
 
 type Vehicle = {
   id: string
@@ -81,6 +83,8 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [vehicleQuery, setVehicleQuery] = useState('')
+  const filteredVehicles = filterVehicles(vehicles, vehicleQuery)
   const additionalPhotos = mediaItems.filter(m => m.media_type === 'photo_additional')
   const photoStage = selectedVehicle ? getPhotoStageRules(selectedVehicle.status) : null
   const showBefore = photoStage?.before !== 'hidden'
@@ -419,6 +423,28 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
     })
   }
 
+  function handleMarkRoadReady() {
+    if (!selectedVehicle) return
+    setConfirmModal({
+      title: 'Mark Road Ready',
+      message: `Release vehicle ${selectedVehicle.plate_number} for customer hand-over? Photo evidence and documents stay archived, and details stay locked.`,
+      confirmText: 'Mark Road Ready',
+      confirmVariant: 'success',
+      onConfirm: async () => {
+        setConfirmModal(null)
+        try {
+          await updateVehicleStatus(selectedVehicle.id, 'road_ready')
+          setSelectedVehicle({ ...selectedVehicle, status: 'road_ready' })
+          showToast(`${selectedVehicle.plate_number} marked Road Ready — ready for hand-over.`, 'success')
+          const list = await fetchActiveVehicles(userRole === 'admin' ? null : userCompanyId)
+          setVehicles(list)
+        } catch (err: any) {
+          showToast(err.message || 'Failed to update status', 'error')
+        }
+      }
+    })
+  }
+
   function currentCostValue(field: CostField): number {
     if (!selectedVehicle) return 0
     return field === 'intake_cost' ? Number(selectedVehicle.intake_cost || 0)
@@ -566,9 +592,11 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
   const innerCard = isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'
 
   // Manager & admin detail view: read-only by default; "Edit Details" unlocks a staged edit session.
+  // Front desk: editable while the job is open, locked once the vehicle is completed / road ready.
   const restrictedRole = userRole === 'manager' || userRole === 'admin'
+  const archivedStatus = selectedVehicle?.status === 'completed' || selectedVehicle?.status === 'road_ready'
   const editing = restrictedRole && editMode
-  const canEditCore = !restrictedRole || editMode
+  const canEditCore = restrictedRole ? editMode : !archivedStatus
   const canEditPhotos = restrictedRole && editMode
 
   function clearStaged() {
@@ -859,9 +887,25 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
                         {selectedVehicle.status === 'pending_before_photos' && `Waiting for the technician to capture the Before photos (${beforePhotos.length}/8 done).`}
                         {selectedVehicle.status === 'in_repair' && 'Vehicle is in repair — After photos are next in the workflow.'}
                         {selectedVehicle.status === 'pending_after_photos' && `Waiting for the technician to capture the After photos (${afterPhotos.length}/8 done).`}
-                        {(selectedVehicle.status === 'completed' || selectedVehicle.status === 'road_ready') && 'Repair complete — all photo evidence and documents are archived.'}
+                        {selectedVehicle.status === 'completed' && (restrictedRole
+                          ? 'Repair complete — all photo evidence and documents are archived.'
+                          : 'Repair complete — all photo evidence and documents are archived. Press “Mark Road Ready” to confirm vehicle is ready.')}
+                        {selectedVehicle.status === 'road_ready' && 'Vehicle is Road Ready. Details are locked.'}
                         {!['intake', 'pending_before_photos', 'in_repair', 'pending_after_photos', 'completed', 'road_ready'].includes(selectedVehicle.status) && 'Managing this vehicle.'}
                       </p>
+                      {!restrictedRole && selectedVehicle.status === 'completed' && (
+                        <button
+                          onClick={handleMarkRoadReady}
+                          className="shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all cursor-pointer"
+                        >
+                          🏁 Mark as Road Ready
+                        </button>
+                      )}
+                      {!restrictedRole && archivedStatus && (
+                        <div className={`shrink-0 px-3 py-2 rounded-xl border text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${isDark ? 'border-slate-700 bg-slate-900 text-slate-400' : 'border-slate-200 bg-white text-slate-500'}`}>
+                          🔒 Details locked — manager can amend
+                        </div>
+                      )}
                       {selectedVehicle.status === 'intake' && canEditCore && (
                         <button onClick={() => {
                           if (editing) {
@@ -1100,10 +1144,22 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
               }
             />
 
+            {!loading && vehicles.length > 0 && (
+              <SearchField
+                isDark={isDark}
+                value={vehicleQuery}
+                onChange={setVehicleQuery}
+                accent="blue"
+                resultLabel={`Showing ${filteredVehicles.length} of ${vehicles.length} vehicles`}
+              />
+            )}
+
             {loading ? (
               <EmptyState isDark={isDark} message="Loading vehicle registry..." />
             ) : vehicles.length === 0 ? (
               <EmptyState isDark={isDark} message="No vehicles found. Click “+ Add Vehicle” to get started." />
+            ) : filteredVehicles.length === 0 ? (
+              <EmptyState isDark={isDark} message={`No vehicles match “${vehicleQuery.trim()}”.`} />
             ) : (
               <>
                 <div className="hidden md:block">
@@ -1119,7 +1175,7 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
                   </tr>
                 </thead>
                 <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
-                  {vehicles.map((v) => (
+                  {filteredVehicles.map((v) => (
                     <tr key={v.id} onClick={() => setSelectedVehicle(v)} className={`transition-colors cursor-pointer ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
                       <td className="p-5 font-bold text-base text-blue-400">{v.plate_number}</td>
                       <td className="p-5">{v.make_model_year}</td>
@@ -1139,7 +1195,7 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
 
                 {/* Mobile card list — tap the card to open the vehicle */}
                 <div className="md:hidden space-y-3">
-                  {vehicles.map((v) => (
+                  {filteredVehicles.map((v) => (
                     <div key={v.id} onClick={() => setSelectedVehicle(v)} className={`border rounded-2xl p-5 flex flex-col gap-3 cursor-pointer active:scale-[0.99] transition-transform ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-base font-bold text-blue-400">{v.plate_number}</span>

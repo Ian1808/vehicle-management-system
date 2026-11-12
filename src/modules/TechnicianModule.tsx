@@ -16,7 +16,9 @@ import Card from '@/components/ui/Card'
 import StatusBadge from '@/components/ui/StatusBadge'
 import SectionHeading from '@/components/ui/SectionHeading'
 import EmptyState from '@/components/ui/EmptyState'
+import SearchField from '@/components/ui/SearchField'
 import ResponsiveTable from '@/components/ui/ResponsiveTable'
+import { filterVehicles } from '@/lib/vehicleSearch'
 import PhotoEvidenceCell from '@/components/technician/PhotoEvidenceCell'
 
 type Vehicle = {
@@ -48,9 +50,12 @@ type PreviewState = { items: { url: string; title: string }[]; index: number } |
 
 export default function TechnicianModule({ embedded = false }: { embedded?: boolean }) {
     const [vehicles, setVehicles] = useState<Vehicle[]>([])
+    const [vehicleQuery, setVehicleQuery] = useState('')
+    const filteredVehicles = filterVehicles(vehicles, vehicleQuery)
     const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null)
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
     const [myAssignments, setMyAssignments] = useState<VehicleAssignment[]>([])
+    const [assignmentPhotos, setAssignmentPhotos] = useState<Record<string, { id: string; file_url: string }[]>>({})
     const [loading, setLoading] = useState(true)
 
     // Modals & UI State
@@ -140,6 +145,7 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                         }
                     } else {
                         setMyAssignments(myAssignments || [])
+                        await hydrateAssignmentPhotos(myAssignments || [])
                     }
                     setLoading(false)
                     return
@@ -446,6 +452,21 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
 
     // ---- Third-party technician handlers ----
 
+    async function hydrateAssignmentPhotos(rows: VehicleAssignment[]) {
+        const { data: mediaRows } = await supabase
+            .from('vehicle_media')
+            .select('id, vehicle_id, category, file_url')
+            .eq('media_type', 'photo_additional')
+        const grouped: Record<string, { id: string; file_url: string }[]> = {}
+        for (const a of rows) {
+            const token = a.id.slice(0, 8)
+            grouped[a.id] = (mediaRows || [])
+                .filter(m => (m.category || '').startsWith('extra_3p_') && (m.category || '').includes(token))
+                .map(m => ({ id: m.id, file_url: m.file_url }))
+        }
+        setAssignmentPhotos(grouped)
+    }
+
     async function reloadMyAssignments() {
         if (!currentUserId) return
         try {
@@ -456,6 +477,7 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                 .order('created_at', { ascending: false })
             if (!data) return
             setMyAssignments(data)
+            await hydrateAssignmentPhotos(data)
         } catch (err) {
             showToast(err instanceof Error ? err.message : 'Failed to refresh assignments', 'error')
         }
@@ -471,7 +493,7 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
             const watermarkText = `CONFIDENTIAL • ${plate} • ${(specialty || 'THIRD-PARTY').toUpperCase()}`
             const fileToUpload = await addWatermarkToFile(file, watermarkText)
             const fileExt = fileToUpload.name.split('.').pop()?.toLowerCase() || 'jpg'
-            const path = `${assignment.vehicle_id}/photo_additional/extra_3p_${slug}_${uniqueFileSuffix()}.${fileExt}`
+            const path = `${assignment.vehicle_id}/photo_additional/extra_3p_${assignment.id.slice(0, 8)}_${slug}_${uniqueFileSuffix()}.${fileExt}`
 
             const { data: uploadData, error: uploadErr } = await supabase.storage
                 .from('vehicle-files')
@@ -483,12 +505,13 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
             await supabase.from('vehicle_media').insert([{
                 vehicle_id: assignment.vehicle_id,
                 media_type: 'photo_additional',
-                category: `extra_3p_${slug}_${uniqueFileSuffix().slice(0, 8)}`,
+                category: `extra_3p_${slug}_${assignment.id.slice(0, 8)}`,
                 file_url: publicURLData.publicUrl,
                 uploaded_by: currentUserId,
             }])
 
             showToast(`Photo uploaded to additional evidence for ${plate}!`, 'success')
+            await reloadMyAssignments()
         } catch (err) {
             showToast(err instanceof Error ? err.message : 'Photo upload failed', 'error')
         } finally {
@@ -602,6 +625,21 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                                                 <p className={`text-[11px] mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                                                     {done && a.completed_at ? `Completed ${new Date(a.completed_at).toLocaleString()}` : `Assigned ${new Date(a.created_at).toLocaleString()}`}
                                                 </p>
+                                                {(assignmentPhotos[a.id] || []).length > 0 ? (
+                                                    <div className="flex flex-wrap gap-2 mb-3">
+                                                        {(assignmentPhotos[a.id] || []).map(ph => (
+                                                            // eslint-disable-next-line @next/next/no-img-element
+                                                            <img key={ph.id} src={ph.file_url} alt="Work evidence" className="w-14 h-14 rounded-lg object-cover border border-slate-700" />
+                                                        ))}
+                                                        <span className={`self-center text-[10px] font-bold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                            {assignmentPhotos[a.id].length} photo{assignmentPhotos[a.id].length > 1 ? 's' : ''} attached
+                                                        </span>
+                                                    </div>
+                                                ) : (
+                                                    <p className={`mb-3 rounded-lg border px-2.5 py-1.5 text-[10px] font-bold uppercase ${isDark ? 'border-amber-800 bg-amber-950/40 text-amber-300' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                                                        ⚠ Attach a work photo to enable completion
+                                                    </p>
+                                                )}
                                             </div>
                                             <div className="flex flex-wrap gap-2">
                                                 <label
@@ -627,7 +665,11 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                                                 {!done && (
                                                     <button
                                                         onClick={() => requestMarkAssignmentComplete(a)}
-                                                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-colors"
+                                                        disabled={(assignmentPhotos[a.id] || []).length === 0}
+                                                        title={(assignmentPhotos[a.id] || []).length === 0 ? 'Upload at least one work photo first' : 'Mark your part complete'}
+                                                        className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold transition-colors ${(assignmentPhotos[a.id] || []).length > 0
+                                                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
+                                                            : isDark ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
                                                     >
                                                         ✓ Mark Part Complete
                                                     </button>
@@ -844,6 +886,17 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                             <EmptyState isDark={isDark} message="No vehicles currently assigned to the workshop queue." />
                         ) : (
                             <>
+                            <SearchField
+                                isDark={isDark}
+                                value={vehicleQuery}
+                                onChange={setVehicleQuery}
+                                accent="emerald"
+                                resultLabel={`Showing ${filteredVehicles.length} of ${vehicles.length} vehicles`}
+                            />
+                            {filteredVehicles.length === 0 ? (
+                                <EmptyState isDark={isDark} message={`No vehicles match “${vehicleQuery.trim()}”.`} />
+                            ) : (
+                            <>
                             <div className="hidden md:block">
                             <ResponsiveTable isDark={isDark} minWidth="min-w-[640px]">
                                 <thead>
@@ -855,7 +908,7 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                                     </tr>
                                 </thead>
                                 <tbody className={`divide-y text-xs font-medium ${isDark ? 'divide-slate-800 text-slate-300' : 'divide-slate-200 text-slate-700'}`}>
-                                    {vehicles.map((v) => (
+                                    {filteredVehicles.map((v) => (
                                         <tr key={v.id} onClick={() => setSelectedVehicle(v)} className={`transition-colors cursor-pointer ${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50'}`}>
                                             <td className="p-5 font-bold text-base text-emerald-400">{v.plate_number}</td>
                                             <td className="p-5">{v.make_model_year}</td>
@@ -875,7 +928,7 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
 
                             {/* Mobile card list — tap the card to open the vehicle */}
                             <div className="md:hidden space-y-3">
-                                {vehicles.map((v) => (
+                                {filteredVehicles.map((v) => (
                                     <div key={v.id} onClick={() => setSelectedVehicle(v)} className={`border rounded-2xl p-5 flex flex-col gap-3 cursor-pointer active:scale-[0.99] transition-transform ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                                         <div className="flex items-center justify-between gap-2">
                                             <span className="text-base font-bold text-emerald-400">{v.plate_number}</span>
@@ -886,6 +939,8 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
                                     </div>
                                 ))}
                             </div>
+                            </>
+                            )}
                             </>
                         )}
                     </div>
