@@ -31,6 +31,15 @@ export default function SignupPage() {
         const { data: authData, error: authError } = await supabase.auth.signUp({
             email,
             password,
+            // The auth trigger reads these to build the profile row. Sending them keeps
+            // the row shaped like a real staff profile (username, not the email string).
+            options: {
+                data: {
+                    username: username.trim().toLowerCase(),
+                    full_name: fullName.trim(),
+                    role,
+                },
+            },
         })
 
         if (authError || !authData.user) {
@@ -39,7 +48,9 @@ export default function SignupPage() {
             return
         }
 
-        const { error: profileError } = await supabase.from('users').insert([
+        // Upsert (not insert): the auth trigger may already have created this user's row,
+        // and an insert would collide on the primary key.
+        const { error: profileError } = await supabase.from('users').upsert([
             {
                 id: authData.user.id,
                 email,
@@ -47,7 +58,7 @@ export default function SignupPage() {
                 full_name: fullName,
                 role,
             }
-        ])
+        ], { onConflict: 'id' })
 
         if (profileError) {
             showToast(profileError.message, 'error')

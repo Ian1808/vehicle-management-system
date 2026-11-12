@@ -71,6 +71,14 @@ export default function LoginPage() {
             return
         }
 
+        // Stamp users.last_login (server-side, service role) before redirecting so the
+        // admin/manager staff lists show a real "Last login" instead of "Never logged in".
+        try {
+            await fetch('/api/auth/last-login', { method: 'POST' })
+        } catch {
+            // Non-fatal: a failed stamp must never block the login.
+        }
+
         showToast('Login successful! Redirecting...', 'success')
 
         setTimeout(() => {

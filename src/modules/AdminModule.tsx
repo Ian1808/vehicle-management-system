@@ -472,50 +472,28 @@ export default function AdminModule() {
         if (!payload.username.trim() || !payload.email.trim() || !payload.password.trim() || !payload.fullName.trim()) return false
 
         try {
-            const cleanUsername = payload.username.trim().toLowerCase()
-            const cleanEmail = payload.email.trim().toLowerCase()
-
-            const { data, error } = await supabase.auth.signUp({
-                email: cleanEmail,
-                password: payload.password.trim(),
-                options: {
-                    data: {
-                        full_name: payload.fullName.trim(),
-                        username: cleanUsername,
-                        role: payload.role,
-                    },
-                },
-            })
-
-            if (error) throw error
-
-            if (data.user) {
-                const upsertPayload: Record<string, unknown> = {
-                    id: data.user.id,
-                    username: cleanUsername,
-                    email: cleanEmail,
-                    full_name: payload.fullName.trim(),
+            // Server route: creates the account with the service-role admin API, so the
+            // admin's own session is never replaced and a failed write rolls the auth
+            // user back (no orphan email that blocks retries).
+            const res = await fetch('/api/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    fullName: payload.fullName,
+                    username: payload.username,
+                    email: payload.email,
+                    password: payload.password,
                     role: payload.role,
-                    company_id: payload.companyId || null,
-                    technician_type: payload.role === 'technician' ? (payload.technicianType || 'inhouse') : null,
-                    specialty: payload.role === 'technician' && payload.technicianType === 'third_party' ? (payload.specialty?.trim() || null) : null,
-                    is_suspended: false,
-                }
+                    companyId: payload.companyId || null,
+                    technicianType: payload.technicianType,
+                    specialty: payload.specialty,
+                }),
+            })
+            const body = await res.json().catch(() => ({} as Record<string, unknown>))
 
-                const { error: upsertErr } = await supabase.from('users').upsert(upsertPayload)
-                if (upsertErr) {
-                    // technician_type/specialty columns may not exist yet if the DB
-                    // migration hasn't been run — retry without them.
-                    if (upsertErr.message.includes('technician_type') || upsertErr.message.includes('specialty')) {
-                        console.warn('[AdminModule] technician_type column missing — staff created without tech profile until DB migration runs')
-                        delete upsertPayload.technician_type
-                        delete upsertPayload.specialty
-                        const retry = await supabase.from('users').upsert(upsertPayload)
-                        if (retry.error) throw retry.error
-                    } else {
-                        throw upsertErr
-                    }
-                }
+            if (!res.ok) {
+                showToast(String(body.message || 'Failed to create staff account.'), 'error')
+                return false
             }
 
             showToast('Staff member registered successfully!', 'success')
@@ -625,16 +603,24 @@ export default function AdminModule() {
             confirmVariant: 'danger',
             onConfirm: async () => {
                 setConfirmModal(null)
-                const { error } = await supabase
-                    .from('users')
-                    .delete()
-                    .eq('id', userId)
-
-                if (error) {
-                    showToast('Error removing user: ' + error.message, 'error')
-                } else {
+                // Server route removes the login account AND the profile row, so the
+                // email can be reused right away (a leftover auth user would otherwise
+                // make re-creation fail with "already registered").
+                try {
+                    const res = await fetch('/api/admin/users', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId }),
+                    })
+                    const body = await res.json().catch(() => ({} as Record<string, unknown>))
+                    if (!res.ok) {
+                        showToast('Error removing user: ' + String(body.message || res.statusText), 'error')
+                        return
+                    }
                     showToast('Staff account removed successfully.', 'success')
                     fetchUsers()
+                } catch (err: any) {
+                    showToast('Error removing user: ' + (err?.message || 'unknown error'), 'error')
                 }
             }
         })
