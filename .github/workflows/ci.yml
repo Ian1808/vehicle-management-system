@@ -32,14 +32,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
-        run: npx tsc --noEmit
-
       - name: Lint
         run: npm run lint
 
       - name: Unit tests
         run: npm test
 
+      # Build before typecheck. Next 16 emits the route types (LayoutProps,
+      # PageProps) as globals into .next/types, and a bare `tsc --noEmit` on a
+      # fresh checkout fails with "Cannot find name 'LayoutProps'".
       - name: Build
         run: npm run build
+
+      - name: Typecheck
+        run: npx tsc --noEmit
