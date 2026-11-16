@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { addWatermarkToFile } from '@/utils/watermark'
+import { errorMessage } from '@/lib/errors'
 import { useTheme } from '@/lib/theme'
 import { PHOTO_CATEGORIES } from '@/lib/photoCategories'
 import { uniqueFileSuffix } from '@/lib/uploadUtils'
@@ -184,8 +185,8 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
 
                 if (fetchErr) throw fetchErr
                 setVehicles(list || [])
-            } catch (err: any) {
-                showToast(err.message || 'Initialization failed', 'error')
+            } catch (err) {
+                showToast(errorMessage(err, 'Initialization failed'), 'error')
             } finally {
                 setLoading(false)
             }
@@ -201,12 +202,17 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
             }
         }
         loadMedia()
+        // Opening a vehicle must land on the tab its status calls for (the
+        // verified behaviour); the tab is user-switchable afterwards, so it is
+        // real UI state rather than a pure derivation of the status.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setPhotoGroup(selectedVehicle ? getStageTab(selectedVehicle.status) : 'before')
     }, [selectedVehicle?.id])
 
     // When the vehicle advances stages in place (Start Repair / Finish Repair / Mark Complete),
     // follow it to the tab the new status needs.
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         if (selectedVehicle) setPhotoGroup(getStageTab(selectedVehicle.status))
     }, [selectedVehicle?.status])
 
@@ -310,8 +316,8 @@ export default function TechnicianModule({ embedded = false }: { embedded?: bool
             showToast('Photo uploaded successfully!', 'success')
             const { data: updatedMedia } = await supabase.from('vehicle_media').select('*').eq('vehicle_id', selectedVehicle.id)
             setMediaItems(updatedMedia || [])
-        } catch (err: any) {
-            showToast(err.message || 'Photo upload failed', 'error')
+        } catch (err) {
+            showToast(errorMessage(err, 'Photo upload failed'), 'error')
         } finally {
             setUploadingKey(null)
         }

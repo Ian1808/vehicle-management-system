@@ -37,6 +37,14 @@ type Props = {
     showToast: (msg: string, type: 'success' | 'error') => void
 }
 
+/** Shape this panel needs from vehicle_media rows (evidence grouped per assignment). */
+type MediaRow = {
+    id: string
+    media_type: string
+    category: string | null
+    file_url: string
+}
+
 type PendingOp =
     | { type: 'assign'; technicianId: string; specialty: string | null; fullName: string }
     | { type: 'unassign'; assignmentId: string }
@@ -47,7 +55,7 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
     const [techs, setTechs] = useState<ThirdPartyTech[]>([])
     const [selectedTechId, setSelectedTechId] = useState('')
     const [loading, setLoading] = useState(true)
-    const [media, setMedia] = useState<{ id: string; media_type: string; category: string | null; file_url: string }[]>([])
+    const [media, setMedia] = useState<MediaRow[]>([])
     const [previewUrl, setPreviewUrl] = useState<string | null>(null)
     const [pendingOps, setPendingOps] = useState<PendingOp[]>([])
     const pendingOpsRef = useRef<PendingOp[]>([])
@@ -66,7 +74,14 @@ export default function ThirdPartyAssignmentPanel({ isDark, vehicleId, vehiclePl
                 ])
                 setAssignments(assignData)
                 setTechs(techData)
-                setMedia(mediaData as any)
+                setMedia(
+                    (mediaData as MediaRow[]).map(m => ({
+                        id: m.id,
+                        media_type: m.media_type,
+                        category: m.category,
+                        file_url: m.file_url,
+                    }))
+                )
                 setSelectedTechId('')
             } catch (err) {
                 showToast(err instanceof Error ? err.message : 'Failed to load assignments', 'error')

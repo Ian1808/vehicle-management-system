@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { addWatermarkToFile } from '@/utils/watermark'
+import { errorMessage } from '@/lib/errors'
 import { fetchActiveVehicles, fetchVehicleMedia, insertVehicle, updateVehicleStatus, deleteDocumentRecord } from '@/services/vehicleService'
 import { useTheme } from '@/lib/theme'
 import { PHOTO_CATEGORIES } from '@/lib/photoCategories'
@@ -186,8 +187,8 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
           url.searchParams.delete('vehicle')
           window.history.replaceState(null, '', url.pathname + url.search)
         }
-      } catch (err: any) {
-        showToast(err.message || 'Initialization failed', 'error')
+      } catch (err) {
+        showToast(errorMessage(err, 'Initialization failed'), 'error')
       } finally {
         setLoading(false)
       }
@@ -204,7 +205,7 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
         try {
           const media = await fetchVehicleMedia(selectedVehicle.id)
           setMediaItems(media)
-        } catch (err: any) {
+        } catch (err) {
           showToast('Failed to load media items', 'error')
         }
       }
@@ -289,8 +290,8 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
       setShowModal(false)
       const list = await fetchActiveVehicles(userRole === 'admin' ? null : userCompanyId)
       setVehicles(list)
-    } catch (err: any) {
-      const msg = err?.message || 'Failed to save vehicle'
+    } catch (err) {
+      const msg = errorMessage(err, 'Failed to save vehicle')
       showToast(msg.includes('duplicate key value violates unique constraint') ? 'A vehicle with this plate or chassis number is already registered.' : msg, 'error')
     }
   }
@@ -358,8 +359,8 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
       showToast('Document stored successfully!', 'success')
       const updatedMedia = await fetchVehicleMedia(selectedVehicle.id)
       setMediaItems(updatedMedia)
-    } catch (err: any) {
-      showToast(err.message || 'Upload failed', 'error')
+    } catch (err) {
+      showToast(errorMessage(err, 'Upload failed'), 'error')
     } finally {
       setUploadingCategory(null)
     }
@@ -397,8 +398,8 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
       showToast('Document removed successfully.', 'success')
       const updatedMedia = await fetchVehicleMedia(selectedVehicle.id)
       setMediaItems(updatedMedia)
-    } catch (err: any) {
-      showToast(err.message || 'Failed to remove document', 'error')
+    } catch (err) {
+      showToast(errorMessage(err, 'Failed to remove document'), 'error')
     }
   }
 
@@ -418,8 +419,8 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
           showToast('Vehicle status updated to Pending Before Photos!', 'success')
           const list = await fetchActiveVehicles(userRole === 'admin' ? null : userCompanyId)
           setVehicles(list)
-        } catch (err: any) {
-          showToast(err.message || 'Failed to update status', 'error')
+        } catch (err) {
+          showToast(errorMessage(err, 'Failed to update status'), 'error')
         }
       }
     })
@@ -440,8 +441,8 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
           showToast(`${selectedVehicle.plate_number} marked Road Ready — ready for hand-over.`, 'success')
           const list = await fetchActiveVehicles(userRole === 'admin' ? null : userCompanyId)
           setVehicles(list)
-        } catch (err: any) {
-          showToast(err.message || 'Failed to update status', 'error')
+        } catch (err) {
+          showToast(errorMessage(err, 'Failed to update status'), 'error')
         }
       }
     })
@@ -509,8 +510,8 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
       setSelectedVehicle({ ...selectedVehicle, ...patch })
       const list = await fetchActiveVehicles(userRole === 'admin' ? null : userCompanyId)
       setVehicles(list)
-    } catch (err: any) {
-      showToast(err.message || 'Failed to update cost', 'error')
+    } catch (err) {
+      showToast(errorMessage(err, 'Failed to update cost'), 'error')
     } finally {
       setCostSaving(false)
       setPendingCostSave(null)
@@ -568,8 +569,8 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
       showToast('Photo removed successfully.', 'success')
       const updatedMedia = await fetchVehicleMedia(selectedVehicle.id)
       setMediaItems(updatedMedia)
-    } catch (err: any) {
-      showToast(err.message || 'Failed to remove photo', 'error')
+    } catch (err) {
+      showToast(errorMessage(err, 'Failed to remove photo'), 'error')
     }
   }
 
@@ -655,8 +656,8 @@ export default function FrontDeskModule({ embedded = false, detailOnly = false, 
       clearStaged()
       setEditMode(false)
       showToast('Changes saved.', 'success')
-    } catch (err: any) {
-      showToast(err.message || 'Failed to save changes', 'error')
+    } catch (err) {
+      showToast(errorMessage(err, 'Failed to save changes'), 'error')
     }
   }
 

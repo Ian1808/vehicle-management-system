@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { addWatermarkToFile } from '@/utils/watermark'
+import { errorMessage } from '@/lib/errors'
 import { uniqueFileSuffix } from '@/lib/uploadUtils'
 import { useTheme } from '@/lib/theme'
 import Toast from '@/components/ui/Toast'
@@ -150,9 +151,13 @@ export default function AdminModule() {
             const validKeys = TABS.map(t => t.key)
             if (Array.isArray(parsed.order)) {
                 const order = parsed.order.filter((k: string) => (validKeys as string[]).includes(k))
+                // Hydrating from localStorage can only happen after mount; the
+                // server render has no access to it, so this is not derivable state.
+                // eslint-disable-next-line react-hooks/set-state-in-effect
                 if (order.length) setSectionOrder(order)
             }
             if (Array.isArray(parsed.hidden)) {
+                // eslint-disable-next-line react-hooks/set-state-in-effect
                 setHiddenSections(parsed.hidden.filter((k: string) => (validKeys as string[]).includes(k)))
             }
         } catch {
@@ -243,6 +248,23 @@ export default function AdminModule() {
         setTimeout(() => setToast(null), 4000)
     }
 
+    async function fetchAllData() {
+        setLoading(true)
+        const vehiclesList = await fetchVehicles()
+        await Promise.all([
+            fetchDeletedVehicles(),
+            fetchBanks(),
+            fetchInsurancePanels(),
+            fetchUsers(),
+            fetchCompanies()
+        ])
+        await fetchScanLogs(vehiclesList)
+        setLoading(false)
+    }
+
+    // Access check + initial load. Kept after fetchAllData's declaration so the
+    // effect body never references a binding declared later in the component;
+    // all effects run after mount, so this ordering is purely readability.
     useEffect(() => {
         async function checkAdminAccess() {
             const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -267,20 +289,6 @@ export default function AdminModule() {
         }
         checkAdminAccess()
     }, [])
-
-    async function fetchAllData() {
-        setLoading(true)
-        const vehiclesList = await fetchVehicles()
-        await Promise.all([
-            fetchDeletedVehicles(),
-            fetchBanks(),
-            fetchInsurancePanels(),
-            fetchUsers(),
-            fetchCompanies()
-        ])
-        await fetchScanLogs(vehiclesList)
-        setLoading(false)
-    }
 
     async function fetchVehicles(): Promise<Vehicle[]> {
         const { data, error } = await supabase
@@ -499,8 +507,8 @@ export default function AdminModule() {
             showToast('Staff member registered successfully!', 'success')
             fetchUsers()
             return true
-        } catch (err: any) {
-            showToast(err.message || 'Failed to create staff account.', 'error')
+        } catch (err) {
+            showToast(errorMessage(err, 'Failed to create staff account.'), 'error')
             return false
         }
     }
@@ -619,8 +627,8 @@ export default function AdminModule() {
                     }
                     showToast('Staff account removed successfully.', 'success')
                     fetchUsers()
-                } catch (err: any) {
-                    showToast('Error removing user: ' + (err?.message || 'unknown error'), 'error')
+                } catch (err) {
+                    showToast('Error removing user: ' + (errorMessage(err, 'unknown error')), 'error')
                 }
             }
         })
@@ -809,8 +817,8 @@ export default function AdminModule() {
                         file_url: publicURLData.publicUrl,
                         uploaded_by: user?.id ?? null,
                     }])
-                } catch (err: any) {
-                    showToast(err.message || `${label} upload failed`, 'error')
+                } catch (err) {
+                    showToast(errorMessage(err, `${label} upload failed`), 'error')
                     return
                 } finally {
                     setUploadingCategory(null)

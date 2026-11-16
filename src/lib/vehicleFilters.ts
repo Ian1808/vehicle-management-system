@@ -94,7 +94,7 @@ const byModel = (a: FilterableVehicle, b: FilterableVehicle) =>
 // Statuses actually present in this list, in canonical stage order.
 export function statusOptionsFor<T extends FilterableVehicle>(list: T[]): string[] {
     return Array.from(new Set(list.map((v) => v.status).filter(Boolean) as string[])).sort(
-        (a, b) => statusRank(a) - statusRank(b),
+        (a, b) => statusRank(a) - statusRank(b)
     )
 }
 

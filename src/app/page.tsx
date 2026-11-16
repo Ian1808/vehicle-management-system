@@ -121,6 +121,9 @@ export default function MainDashboard() {
     useEffect(() => {
         const active = window.localStorage.getItem('vms_impersonating') === '1'
         if (!active) return
+        // Browser-only store read once on mount — there is no server value to
+        // derive this from, so it cannot be computed during render.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setImpersonation({ active: true, name: window.localStorage.getItem('vms_impersonating_user') || 'User' })
     }, [])
 

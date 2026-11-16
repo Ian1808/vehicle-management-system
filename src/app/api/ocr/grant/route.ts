@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import https from 'node:https'
+import { getSessionUser, unauthorizedResponse } from '@/lib/apiAuth'
 
 // Server-side proxy to Google Gemini (gemini-3.8-flash, low thinking) for
 // grant OCR. The API key stays in .env.local and never reaches the browser.
@@ -10,6 +11,11 @@ import https from 'node:https'
 // timeout — reusing undici's keep-alive pool could hang on a stale socket, and
 // an unbounded request would leave the scanner spinning forever.
 const MODEL = 'gemini-3.8-flash'
+
+// A compressed intake photo is well under 1 MB (~1.4M base64 chars); 8M chars is
+// a generous ceiling that still keeps a single request from pinning the function
+// with a huge body. Anything above it is rejected before Gemini is called.
+const MAX_BASE64_CHARS = 8_000_000
 
 // Vercel: scans take ~6-9s against Gemini, so raise the function timeout above
 // the 10s default (Hobby allows up to 60s).
@@ -39,10 +45,7 @@ async function callGemini(key: string, imageBase64: string, mimeType: string) {
         contents: [
             {
                 role: 'user',
-                parts: [
-                    { text: PROMPT },
-                    { inline_data: { mime_type: mimeType, data: imageBase64 } },
-                ],
+                parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: imageBase64 } }],
             },
         ],
         generationConfig: {
@@ -52,7 +55,9 @@ async function callGemini(key: string, imageBase64: string, mimeType: string) {
     })
 
     return new Promise<{ text: string; model: string }>((resolve, reject) => {
-        const url = new URL(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`)
+        const url = new URL(
+            `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`
+        )
         url.searchParams.set('key', key)
         const request = https.request(
             url,
@@ -97,7 +102,7 @@ async function callGemini(key: string, imageBase64: string, mimeType: string) {
                         return
                     }
                     const parts = response?.candidates?.[0]?.content?.parts || []
-                    const text = parts.map(p => p.text || '').join('')
+                    const text = parts.map((p) => p.text || '').join('')
                     if (!text.trim()) {
                         reject(new Error('Gemini returned an empty response'))
                         return
@@ -124,6 +129,12 @@ export async function POST(req: NextRequest) {
         )
     }
 
+    // This route spends a paid API key, so it must only answer signed-in staff.
+    // The page middleware redirects anonymous visitors, but a redirect is not an
+    // authorization check — do it here, where the billing actually happens.
+    const user = await getSessionUser()
+    if (!user) return unauthorizedResponse()
+
     let imageBase64 = ''
     let mimeType = 'image/jpeg'
     try {
@@ -134,14 +145,23 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'bad_request', message: 'Invalid JSON body' }, { status: 400 })
     }
     if (!imageBase64) {
-        return NextResponse.json({ error: 'bad_request', message: 'imageBase64 is required' }, { status: 400 })
+        return NextResponse.json(
+            { error: 'bad_request', message: 'imageBase64 is required' },
+            { status: 400 }
+        )
+    }
+    if (imageBase64.length > MAX_BASE64_CHARS) {
+        return NextResponse.json(
+            { error: 'too_large', message: 'That file is too large to scan. Try a smaller photo.' },
+            { status: 413 }
+        )
     }
     if (!['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(mimeType)) {
         return NextResponse.json({ error: 'bad_request', message: 'Unsupported file type' }, { status: 400 })
     }
 
     let geminiText = ''
-    let apiError: Error & { statusCode?: number } | null = null
+    let apiError: (Error & { statusCode?: number }) | null = null
     try {
         const res = await callGemini(key, imageBase64, mimeType)
         geminiText = res.text
@@ -151,14 +171,14 @@ export async function POST(req: NextRequest) {
 
     if (apiError) {
         const status = apiError.statusCode === 401 || apiError.statusCode === 403 ? 503 : 502
-        return NextResponse.json(
-            { error: 'gemini_error', message: apiError.message },
-            { status }
-        )
+        return NextResponse.json({ error: 'gemini_error', message: apiError.message }, { status })
     }
 
     // Gemini is asked for strict JSON; guard against stray markdown fences.
-    const cleaned = geminiText.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
+    const cleaned = geminiText
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/```\s*$/, '')
+        .trim()
     let fields: {
         plate?: unknown
         chassis?: unknown
@@ -173,10 +193,16 @@ export async function POST(req: NextRequest) {
     try {
         fields = JSON.parse(cleaned)
     } catch {
-        return NextResponse.json({ error: 'parse_failed', message: 'Gemini output was not valid JSON' }, { status: 422 })
+        return NextResponse.json(
+            { error: 'parse_failed', message: 'Gemini output was not valid JSON' },
+            { status: 422 }
+        )
     }
     if (!fields || typeof fields !== 'object') {
-        return NextResponse.json({ error: 'parse_failed', message: 'Gemini output was not an object' }, { status: 422 })
+        return NextResponse.json(
+            { error: 'parse_failed', message: 'Gemini output was not an object' },
+            { status: 422 }
+        )
     }
 
     const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')

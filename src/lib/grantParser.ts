@@ -38,7 +38,14 @@ export type GrantInspect = {
     confidence?: Record<string, number> // per-field 0-100
     rotation: number
     refined: string[]
-    fields: Array<{ key: string; label: string; value: string; source: string; refined: boolean; confidence?: number }>
+    fields: Array<{
+        key: string
+        label: string
+        value: string
+        source: string
+        refined: boolean
+        confidence?: number
+    }>
     lines: Array<{ text: string; kind: 'label' | 'value'; labelType?: string; field?: string }>
 }
 
@@ -66,9 +73,17 @@ export function normalizeKey(s: string) {
 // later re-scan the exact row region of each field.
 export function classifyGrantLines(lines: OcrLine[]): GrantClassification {
     const rawLines = lines
-        .map(l => ({ ...l, text: l.text.toUpperCase().replace(/\r/g, '').replace(/\s+/g, ' ').trim() }))
-        .filter(l => l.text.length > 0)
-    const result: ParsedGrant = { plate: '', chassis: '', make: '', model: '', variant: '', spec: '', year: '' }
+        .map((l) => ({ ...l, text: l.text.toUpperCase().replace(/\r/g, '').replace(/\s+/g, ' ').trim() }))
+        .filter((l) => l.text.length > 0)
+    const result: ParsedGrant = {
+        plate: '',
+        chassis: '',
+        make: '',
+        model: '',
+        variant: '',
+        spec: '',
+        year: '',
+    }
 
     // Known grant labels, in priority order (a line can match several — e.g.
     // "Tarikh Pendaftaran" is a date label, not the plate label). All regexes
@@ -101,9 +116,12 @@ export function classifyGrantLines(lines: OcrLine[]): GrantClassification {
     const values: string[] = []
     const lineRecords: ClassifiedLine[] = []
     const cleanValue = (s: string) =>
-        s.replace(/[^A-Z0-9 .()/-]/g, ' ').replace(/\s+/g, ' ').trim()
+        s
+            .replace(/[^A-Z0-9 .()/-]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
     for (const line of rawLines) {
-        const entry = LABELS.find(l => {
+        const entry = LABELS.find((l) => {
             l.re.lastIndex = 0
             return l.re.test(line.text)
         })
@@ -133,11 +151,14 @@ export function classifyGrantLines(lines: OcrLine[]): GrantClassification {
         // digit, a "/" separator, or 2+ words ("Berdaftar"/"Bakar"/"Asal" are
         // label fragments too).
         if (tail) {
-            const containsLabel = LABELS.some(l => {
+            const containsLabel = LABELS.some((l) => {
                 l.re.lastIndex = 0
                 return l.re.test(tail)
             })
-            if (!containsLabel && (/\d/.test(tail) || tail.includes('/') || tail.split(/\s+/).filter(Boolean).length >= 2)) {
+            if (
+                !containsLabel &&
+                (/\d/.test(tail) || tail.includes('/') || tail.split(/\s+/).filter(Boolean).length >= 2)
+            ) {
                 values.push(tail)
                 // The line is still a LABEL (it names the field) but also
                 // carries an inline value — keep both facts on the record.
@@ -193,7 +214,7 @@ export function classifyGrantLines(lines: OcrLine[]): GrantClassification {
     const mmLabelIdx = idxOf('MODEL')
     let mmValIdx = -1
     const mmCandidates = near(mmLabelIdx)
-        .map(i => ({ i, v: values[i] }))
+        .map((i) => ({ i, v: values[i] }))
         .filter(({ v }) => {
             const tokens = v.split(/\s+/).filter(Boolean)
             // 2+ words, and not an all-digits line (ID number / capacity).
@@ -204,7 +225,7 @@ export function classifyGrantLines(lines: OcrLine[]): GrantClassification {
     let knownDist = Infinity
     for (const c of mmCandidates) {
         const norm = normalizeKey(c.v)
-        if (rankedMakes.some(mk => norm.startsWith(normalizeKey(mk)))) {
+        if (rankedMakes.some((mk) => norm.startsWith(normalizeKey(mk)))) {
             const d = mmLabelIdx === -1 ? c.i : Math.abs(c.i - mmLabelIdx)
             if (d < knownDist) {
                 knownDist = d
@@ -212,19 +233,21 @@ export function classifyGrantLines(lines: OcrLine[]): GrantClassification {
             }
         }
     }
-    const mmHit = knownHit ?? mmCandidates.reduce<{ i: number; v: string; score: number } | null>(
-        (best, c) => {
+    const mmHit =
+        knownHit ??
+        mmCandidates.reduce<{ i: number; v: string; score: number } | null>((best, c) => {
             const d = mmLabelIdx === -1 ? c.i : Math.abs(c.i - mmLabelIdx)
             let score = -d * 0.5
             if (c.v.includes('/')) score += 1.5
             if (c.v.split(/\s+/).length <= 5) score += 1
             return !best || score > best.score ? { ...c, score } : best
-        },
-        null
-    )
+        }, null)
     if (mmHit) {
         mmValIdx = mmHit.i
-        const parts = mmHit.v.split('/').map(s => s.trim()).filter(Boolean)
+        const parts = mmHit.v
+            .split('/')
+            .map((s) => s.trim())
+            .filter(Boolean)
         if (parts.length >= 2) {
             result.make = parts[0]
             result.model = parts.slice(1).join(' / ')
@@ -315,7 +338,7 @@ export function classifyGrantLines(lines: OcrLine[]): GrantClassification {
     }
     const mark = (sourceText: string, field: string) => {
         if (!sourceText) return
-        const rec = lineRecords.find(r => r.valueText === sourceText)
+        const rec = lineRecords.find((r) => r.valueText === sourceText)
         if (rec && !rec.field) rec.field = field
     }
     mark(sources.plate, 'plate')
@@ -333,7 +356,7 @@ export function parseGrantText(raw: string): ParsedGrant {
         raw
             .replace(/\r/g, '')
             .split('\n')
-            .map(l => ({ text: l }))
+            .map((l) => ({ text: l }))
     ).parsed
 }
 
@@ -356,7 +379,7 @@ export function scoreGrant(p: ParsedGrant): number {
 // cross-section mixups (e.g. an address's digits stealing the spec field).
 export function planRegionBands(c: GrantClassification): RegionBand[] {
     const bandFor = (field: RegionBand['field'], sourceText: string): RegionBand => {
-        const rec = sourceText ? c.lineRecords.find(r => r.valueText === sourceText) : undefined
+        const rec = sourceText ? c.lineRecords.find((r) => r.valueText === sourceText) : undefined
         return { field, bbox: rec?.bbox }
     }
     return [
@@ -378,8 +401,8 @@ export function extractBandFields(band: RegionBand['field'], rawText: string): P
         .toUpperCase()
         .replace(/\r/g, '')
         .split('\n')
-        .map(l => l.replace(/\s+/g, ' ').trim())
-        .map(l => (l.includes(':') ? l.slice(l.lastIndexOf(':') + 1).trim() : l))
+        .map((l) => l.replace(/\s+/g, ' ').trim())
+        .map((l) => (l.includes(':') ? l.slice(l.lastIndexOf(':') + 1).trim() : l))
         .filter(Boolean)
     if (band === 'plate') {
         for (const l of lines) {
@@ -399,22 +422,27 @@ export function extractBandFields(band: RegionBand['field'], rawText: string): P
         return {}
     }
     if (band === 'makeModel') {
-        const rankedMakes = [...getVehicleMakes()].sort((a, b) => normalizeKey(b).length - normalizeKey(a).length)
+        const rankedMakes = [...getVehicleMakes()].sort(
+            (a, b) => normalizeKey(b).length - normalizeKey(a).length
+        )
         let bestLine = lines[0] || ''
         for (const l of lines) {
             const norm = normalizeKey(l)
-            if (rankedMakes.some(mk => norm.startsWith(normalizeKey(mk)))) {
+            if (rankedMakes.some((mk) => norm.startsWith(normalizeKey(mk)))) {
                 bestLine = l
                 break
             }
         }
         const startsKnown = (s: string) =>
-            rankedMakes.some(mk => normalizeKey(s).startsWith(normalizeKey(mk)))
+            rankedMakes.some((mk) => normalizeKey(s).startsWith(normalizeKey(mk)))
         if (lines.length > 1 && !startsKnown(bestLine)) {
             bestLine = lines.reduce((a, b) => (b.length > a.length ? b : a))
         }
         if (!bestLine) return {}
-        const parts = bestLine.split('/').map(s => s.trim()).filter(Boolean)
+        const parts = bestLine
+            .split('/')
+            .map((s) => s.trim())
+            .filter(Boolean)
         if (parts.length >= 2) {
             const model = parts.slice(1).join(' / ')
             const modelTokens = model.split(/\s+/).filter(Boolean)
@@ -465,7 +493,7 @@ export function buildGrantInspect(
         model: extras.model,
         score: extras.score,
         confidence: extras.confidence,
-        fields: Object.keys(FIELD_LABELS).map(key => ({
+        fields: Object.keys(FIELD_LABELS).map((key) => ({
             key,
             label: FIELD_LABELS[key],
             value: (c.parsed as Record<string, string>)[key] || '',
@@ -473,6 +501,11 @@ export function buildGrantInspect(
             refined: refined.includes(key),
             confidence: extras.confidence ? extras.confidence[key] || 0 : undefined,
         })),
-        lines: c.lineRecords.map(r => ({ text: r.text, kind: r.kind, labelType: r.labelType, field: r.field })),
+        lines: c.lineRecords.map((r) => ({
+            text: r.text,
+            kind: r.kind,
+            labelType: r.labelType,
+            field: r.field,
+        })),
     }
 }

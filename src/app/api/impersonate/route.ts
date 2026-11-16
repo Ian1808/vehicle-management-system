@@ -48,9 +48,15 @@ export async function POST(req: NextRequest) {
             },
         },
     })
-    const { data: { user: callerUser }, error: callerError } = await caller.auth.getUser()
+    const {
+        data: { user: callerUser },
+        error: callerError,
+    } = await caller.auth.getUser()
     if (callerError || !callerUser) {
-        return NextResponse.json({ error: 'unauthorized', message: 'You must be signed in.' }, { status: 401 })
+        return NextResponse.json(
+            { error: 'unauthorized', message: 'You must be signed in.' },
+            { status: 401 }
+        )
     }
 
     const admin = createClient(url, serviceKey, {
@@ -87,7 +93,10 @@ export async function POST(req: NextRequest) {
     }
     if (!target.email) {
         return NextResponse.json(
-            { error: 'bad_request', message: 'That account has no email — impersonation needs a valid email.' },
+            {
+                error: 'bad_request',
+                message: 'That account has no email — impersonation needs a valid email.',
+            },
             { status: 400 }
         )
     }

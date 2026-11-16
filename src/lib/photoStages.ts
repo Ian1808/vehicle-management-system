@@ -29,11 +29,17 @@ export type PhotoGroupKey = 'before' | 'after' | 'additional'
 // lands directly on the stage that actually needs input instead of hunting for it.
 export function getStageTab(status: string): PhotoGroupKey {
     switch (status) {
-        case 'pending_before_photos': return 'before'
-        case 'in_repair': return 'additional'   // 'after' is hidden until repair is finished
-        case 'pending_after_photos': return 'after'
-        case 'completed': return 'after'
-        case 'road_ready': return 'after'
-        default: return 'before'
+        case 'pending_before_photos':
+            return 'before'
+        case 'in_repair':
+            return 'additional' // 'after' is hidden until repair is finished
+        case 'pending_after_photos':
+            return 'after'
+        case 'completed':
+            return 'after'
+        case 'road_ready':
+            return 'after'
+        default:
+            return 'before'
     }
 }

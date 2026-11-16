@@ -31,21 +31,30 @@ export default function LoginPage() {
         const identifier = email.trim()
         let loginEmail = identifier
 
-        // Allow login by username: resolve the username to the account email first.
+        // Allow login by username: the server resolves the username to the account
+        // email. This runs through an API route rather than reading public.users
+        // from the browser, so row level security can stay enabled on that table
+        // (a direct anon read would hand the whole staff roster to any visitor).
         if (!identifier.includes('@')) {
-            const safePattern = identifier.replace(/[\\%_]/g, '\\$&')
-            const { data: userProfile, error: profileErr } = await supabase
-                .from('users')
-                .select('email')
-                .ilike('username', safePattern)
-                .maybeSingle()
+            try {
+                const res = await fetch('/api/auth/resolve-login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ identifier }),
+                })
+                const payload = (await res.json().catch(() => ({}))) as { email?: string; message?: string }
 
-            if (profileErr || !userProfile?.email) {
-                showToast('Username not found. Please check your username.', 'error')
+                if (!res.ok || !payload.email) {
+                    showToast(payload.message || 'Username not found. Please check your username.', 'error')
+                    setLoading(false)
+                    return
+                }
+                loginEmail = payload.email
+            } catch {
+                showToast('Could not reach the sign-in service. Check your connection and try again.', 'error')
                 setLoading(false)
                 return
             }
-            loginEmail = userProfile.email
         }
 
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({

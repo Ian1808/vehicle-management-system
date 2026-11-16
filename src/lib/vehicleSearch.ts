@@ -23,7 +23,9 @@ const STATUS_WORDS: Record<string, string> = {
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '')
 
 export function vehicleSearchHaystack(vehicle: SearchableVehicle): string {
-    const statusLabel = vehicle.status ? STATUS_WORDS[vehicle.status] || vehicle.status.replace(/_/g, ' ') : ''
+    const statusLabel = vehicle.status
+        ? STATUS_WORDS[vehicle.status] || vehicle.status.replace(/_/g, ' ')
+        : ''
     return normalize(
         [
             vehicle.plate_number || '',
@@ -32,17 +34,13 @@ export function vehicleSearchHaystack(vehicle: SearchableVehicle): string {
             vehicle.insurance_panel || '',
             statusLabel,
             vehicle.companies?.name || '',
-        ].join(' '),
+        ].join(' ')
     )
 }
 
 export function matchesVehicleQuery(vehicle: SearchableVehicle, query: string): boolean {
     const tokens = normalize(query).length
-        ? query
-              .toLowerCase()
-              .split(/\s+/)
-              .map(normalize)
-              .filter(Boolean)
+        ? query.toLowerCase().split(/\s+/).map(normalize).filter(Boolean)
         : []
     if (tokens.length === 0) return true
     const haystack = vehicleSearchHaystack(vehicle)

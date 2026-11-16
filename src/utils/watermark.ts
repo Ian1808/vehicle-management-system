@@ -95,8 +95,14 @@ async function addWatermarkToPDF(file: File, watermarkText: string): Promise<Fil
         }
 
         const pdfBytes = await pdfDoc.save()
-        // Cast pdfBytes to any to avoid TypeScript Uint8Array<ArrayBufferLike> type error
-        return new File([pdfBytes as any], file.name, { type: 'application/pdf', lastModified: Date.now() })
+        // BlobPart wants an ArrayBuffer-backed view; pdf-lib returns
+        // Uint8Array<ArrayBufferLike>, so slice into a fresh ArrayBuffer instead of
+        // casting the whole thing to `any`.
+        const buffer = pdfBytes.buffer.slice(
+            pdfBytes.byteOffset,
+            pdfBytes.byteOffset + pdfBytes.byteLength
+        ) as ArrayBuffer
+        return new File([buffer], file.name, { type: 'application/pdf', lastModified: Date.now() })
     } catch (err) {
         console.error('PDF Watermark error:', err)
         return file

@@ -20,6 +20,9 @@ export default function PreviewModal({ preview, onClose, onDownload, onNavigate,
 
     // Reset zoom whenever a different item is shown.
     useEffect(() => {
+        // Resetting the viewport on item change is the purpose of this effect;
+        // deriving it during render would reset the zoom mid-gesture instead.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setZoomIdx(0)
     }, [preview?.index])
 
