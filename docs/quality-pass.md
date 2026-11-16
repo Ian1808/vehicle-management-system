@@ -107,3 +107,31 @@ one silent 404 for unknown/suspended/blank). Nothing pre-auth reads `users` any 
 Not exercised: the manager suspend / reactivate write path (`users_update_manager_company`
 policy) — it was verified at the SQL level only, not clicked through the UI.
 
+## Access gate: `middleware.ts` → `src/proxy.ts` (2026-11-16)
+
+Username login broke on the deployed site while email login kept working, and the
+local build looked fine. Two things were stacked:
+
+1. Next 16 renamed the `middleware` file convention to `proxy` and resolves it
+   beside `app/`. The gate was still a root `middleware.ts`, so it ran in the
+   Vercel build but not in local dev — which is why every test here passed
+   against code that could not work in production.
+2. The gate redirected every unauthenticated path to `/login`, `/api/auth/resolve-login`
+   included. The login form's POST came back as `307 → /login` with HTML, `res.json()`
+   threw, and only the email branch survived (it never called the route).
+
+Symptom that identified it: on the deployed site even a nonexistent `/api/...`
+route answered `307 → /login` rather than `404`.
+
+Fix: the gate now lives at `src/proxy.ts` (exported as `proxy`) with the pre-auth
+lookup exempted. Verified against a production build, and then on the deployment:
+
+| Check | Result |
+|---|---|
+| `GET /` unauthenticated | `307 → /login` (gate still on) |
+| `POST /api/auth/resolve-login {identifier:"admin"}` | `200 {"email":"admin@workshop.com"}` |
+| unknown username | `404 "Username not found. Please check your username."` |
+| email identifier | `200`, echoes the email, no lookup |
+| all six staff usernames, real UI login | each lands on its own portal |
+| bad username in the UI | readable toast |
+
